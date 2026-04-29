@@ -30,9 +30,23 @@ object UpdateChecker {
     private val json = Json { ignoreUnknownKeys = true }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(0, TimeUnit.SECONDS) // 不限制总时长，APK 体积较大
         .build()
+
+    /**
+     * GitHub Releases 在国内直连基本拉不动（github.com 限速 + objects.githubusercontent.com 经常被墙）。
+     * 走第三方反代镜像把同一个 URL 拉下来，无需翻墙。
+     * 有的镜像会随时挂掉，所以多备几个，按顺序尝试。
+     */
+    private val downloadMirrors: List<(String) -> String> = listOf(
+        { url -> "https://ghfast.top/$url" },
+        { url -> "https://gh-proxy.com/$url" },
+        { url -> "https://mirror.ghproxy.com/$url" },
+        { url -> "https://ghps.cc/$url" },
+        { url -> url }, // 兜底直连，最后一个尝试
+    )
 
     sealed class State {
         object Idle : State()
@@ -98,33 +112,51 @@ object UpdateChecker {
 
     fun download(context: Context, available: State.Available): Flow<State> = flow {
         emit(State.Downloading(0f))
-        val req = Request.Builder().url(available.downloadUrl).build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                emit(State.Error("下载失败 ${resp.code}"))
-                return@use
-            }
-            val source = resp.body?.byteStream() ?: run {
-                emit(State.Error("下载流为空"))
-                return@use
-            }
-            val dir = File(context.getExternalFilesDir(null), "updates").apply { mkdirs() }
-            // 清理旧文件
-            dir.listFiles()?.forEach { if (it.name.endsWith(".apk")) it.delete() }
-            val file = File(dir, "XingShuHelper-${available.latestVersion}.apk")
-            val total = available.sizeBytes.takeIf { it > 0 } ?: -1L
-            file.outputStream().use { out ->
-                val buf = ByteArray(64 * 1024)
-                var read: Int
-                var bytes = 0L
-                while (source.read(buf).also { read = it } != -1) {
-                    out.write(buf, 0, read)
-                    bytes += read
-                    if (total > 0) emit(State.Downloading((bytes.toDouble() / total).toFloat()))
+        val dir = File(context.getExternalFilesDir(null), "updates").apply { mkdirs() }
+        dir.listFiles()?.forEach { if (it.name.endsWith(".apk")) it.delete() }
+        val file = File(dir, "XingShuHelper-${available.latestVersion}.apk")
+        val total = available.sizeBytes.takeIf { it > 0 } ?: -1L
+
+        var lastError: String? = null
+        for ((idx, mirror) in downloadMirrors.withIndex()) {
+            val url = mirror(available.downloadUrl)
+            android.util.Log.d("UpdateChecker", "下载尝试 [${idx + 1}/${downloadMirrors.size}]: $url")
+            val ok = try {
+                val req = Request.Builder().url(url).build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        lastError = "${resp.code}"
+                        return@use false
+                    }
+                    val source = resp.body?.byteStream() ?: run {
+                        lastError = "响应体为空"
+                        return@use false
+                    }
+                    file.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        var read: Int
+                        var bytes = 0L
+                        while (source.read(buf).also { read = it } != -1) {
+                            out.write(buf, 0, read)
+                            bytes += read
+                            if (total > 0) emit(State.Downloading((bytes.toDouble() / total).toFloat()))
+                        }
+                    }
+                    true
                 }
+            } catch (e: Exception) {
+                lastError = e.message ?: e.javaClass.simpleName
+                android.util.Log.w("UpdateChecker", "镜像 $url 失败：$lastError")
+                false
             }
-            emit(State.ReadyToInstall(file))
+            if (ok && file.length() > 0) {
+                emit(State.ReadyToInstall(file))
+                return@flow
+            }
+            // 失败，回到 0% 继续下一个镜像
+            emit(State.Downloading(0f))
         }
+        emit(State.Error("所有下载镜像均失败：${lastError ?: "未知"}"))
     }.flowOn(Dispatchers.IO)
 
     fun launchInstall(context: Context, apk: File) {
