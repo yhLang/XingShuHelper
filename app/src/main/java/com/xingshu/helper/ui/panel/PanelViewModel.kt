@@ -643,8 +643,10 @@ class PanelViewModel(
         _state.update { it.copy(lastQuery = LastQuery.Dialog(dialog)) }
         generateJob?.cancel()
         generateJob = viewModelScope.launch {
-            // 检索时只用客户那边的话，否则会把"我"的旧回复混进 RAG query 影响相似度
+            // 检索时只用客户那边的话，否则会把"我"的旧回复混进 RAG query 影响相似度。
+            // 只取最近 3 条：早期消息已处理完，拼进去会稀释最新问题的语义信号。
             val customerOnly = dialog.filter { it.role == DialogRole.CUSTOMER }
+                .takeLast(3)
                 .joinToString("\n") { it.text }
             doRagOnly(customerOnly)
         }

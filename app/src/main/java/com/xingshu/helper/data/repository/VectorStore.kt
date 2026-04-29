@@ -11,13 +11,13 @@ class VectorStore {
     val isReady: Boolean get() = entries.isNotEmpty()
 
     fun initialize(items: List<Pair<QAItem, FloatArray>>) {
-        entries = items.toList()
+        entries = items.map { (item, vec) -> item to normalize(vec) }
     }
 
     /** 运行时追加条目，例如用户在 App 里添加新金标 QA 后立即生效。 */
     fun appendEntries(more: List<Pair<QAItem, FloatArray>>) {
         if (more.isEmpty()) return
-        entries = entries + more
+        entries = entries + more.map { (item, vec) -> item to normalize(vec) }
     }
 
     /**
@@ -29,7 +29,7 @@ class VectorStore {
         val filtered = entries.filterNot { (item, _) ->
             item.questions.firstOrNull() == question
         }
-        entries = filtered + (newItem to newVec)
+        entries = filtered + (newItem to normalize(newVec))
     }
 
     /** 找回 question 对应的向量（编辑 answer 时复用原向量，不需重新调 embedding API）。 */
@@ -53,14 +53,17 @@ class VectorStore {
     fun search(query: FloatArray, topK: Int = 5): List<Pair<QAItem, Float>> {
         val snapshot = entries
         if (snapshot.isEmpty()) return emptyList()
+        val queryNorm = normalize(query)
         return snapshot
             .map { (item, vec) ->
-                val raw = cosineSimilarity(query, vec)
+                val raw = dotProduct(queryNorm, vec)
                 // 金标话术加分（boost），让人工挑选的高质量回复更容易进 top-K
                 val boosted = if (item.isGold) raw + GOLD_BOOST else raw
                 Triple(item, raw, boosted)
             }
             .sortedByDescending { it.third }
+            // 按 answer 去重：同一话术可能对应多个 Q 变体，避免 top-K 被同一条 answer 的不同问法占满
+            .distinctBy { it.first.answer }
             .take(topK)
             // 排序用 boosted，但展示给 UI 的还是原始相似度，避免误导
             .map { (item, raw, _) -> item to raw }
@@ -71,17 +74,21 @@ class VectorStore {
         private const val GOLD_BOOST = 0.05f
     }
 
-    private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
+    /**
+     * 加载时归一化到单位向量，搜索时退化为纯点积，省去每次计算 normB。
+     * API 返回的向量通常已归一化，此处做一次防御性处理。
+     */
+    private fun normalize(v: FloatArray): FloatArray {
+        var norm = 0f
+        for (x in v) norm += x * x
+        norm = sqrt(norm)
+        return if (norm < 1e-10f) v.copyOf() else FloatArray(v.size) { v[it] / norm }
+    }
+
+    private fun dotProduct(a: FloatArray, b: FloatArray): Float {
         if (a.size != b.size) return 0f
-        var dot = 0.0
-        var normA = 0.0
-        var normB = 0.0
-        for (i in a.indices) {
-            dot += a[i] * b[i]
-            normA += a[i] * a[i]
-            normB += b[i] * b[i]
-        }
-        val denom = sqrt(normA) * sqrt(normB)
-        return if (denom == 0.0) 0f else (dot / denom).toFloat()
+        var dot = 0f
+        for (i in a.indices) dot += a[i] * b[i]
+        return dot
     }
 }
