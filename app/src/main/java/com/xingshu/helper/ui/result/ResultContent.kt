@@ -11,8 +11,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -87,7 +85,7 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                         )
                     }
                     result.ragMatches.forEachIndexed { index, match ->
-                        item(key = state.referencedQas.getOrNull(index)?.item?.questions?.firstOrNull() ?: "rag_$index") {
+                        item {
                             // referencedQas 顺序与 ragMatches 一致：第 i 条 QAItem 即是 ragMatches[i] 的来源
                             val sourceItem = state.referencedQas.getOrNull(index)?.item
                             RagMatchCard(
@@ -371,20 +369,12 @@ private fun RagMatchCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (sourceItem != null) {
                     IconButton(onClick = onToggleGold, modifier = Modifier.size(28.dp)) {
-                        if (match.isGold) {
-                            Icon(
-                                Icons.Default.Star,
-                                contentDescription = "取消金标",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.tertiary,
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.StarBorder,
-                                contentDescription = "设为金标",
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
+                        Text(
+                            text = if (match.isGold) "★" else "☆",
+                            fontSize = 18.sp,
+                            color = if (match.isGold) MaterialTheme.colorScheme.tertiary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     IconButton(onClick = { editing = true }, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(16.dp))
