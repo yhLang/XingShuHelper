@@ -626,9 +626,11 @@ class PanelViewModel(
             return emptyList()
         }
         val hits = vectorStore.search(queryVec, topK = 5)
+        // 稳定排序：金标条目永远排在最前，非金标按原 boosted 顺序保留
+        val sorted = hits.sortedByDescending { (item, _) -> item.isGold }
         // 把检索结果（带分数）写入 state，RAG+AI 模式下结果页展示「参考话术」面板
-        _state.update { it.copy(referencedQas = hits.map { (item, score) -> ReferencedQa(item, score) }) }
-        return hits
+        _state.update { it.copy(referencedQas = sorted.map { (item, score) -> ReferencedQa(item, score) }) }
+        return sorted
     }
 
     private suspend fun retrieveContext(query: String): List<QAItem> {
