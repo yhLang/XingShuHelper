@@ -188,6 +188,7 @@ class PanelViewModel(
         }
         // OCR 模式：dialogMessages 是单一真源，UI 直接渲染气泡
         // 清空 basket 是为了让 UI 切到 dialog 视图，不再显示残留的剪贴板条目
+        val hadBasket = _state.value.basket.isNotEmpty()
         _state.update {
             it.copy(
                 dialogMessages = messages,
@@ -195,7 +196,8 @@ class PanelViewModel(
                 visionState = VisionState.Idle
             )
         }
-        showSnackbar("已识别 ${messages.size} 条对话（客户 $customerCount / 我 $meCount）")
+        val suffix = if (hadBasket) "（已清空本轮消息）" else ""
+        showSnackbar("已识别 ${messages.size} 条对话（客户 $customerCount / 我 $meCount）$suffix")
     }
 
     private suspend fun loadCorpus(account: BusinessAccount) {

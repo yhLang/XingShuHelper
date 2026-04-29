@@ -160,7 +160,8 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                     item { MetaInfo(result = result) }
                 }
 
-                if (state.referencedQas.isNotEmpty()) {
+                // RAG 直接匹配模式下 referencedQas 与上方卡片完全相同，不重复展示
+                if (!result.isDirectMatch && state.referencedQas.isNotEmpty()) {
                     item { ReferenceSources(items = state.referencedQas) }
                 }
 
@@ -248,6 +249,7 @@ private fun ReplyCard(
             Text(label, fontWeight = FontWeight.SemiBold, color = labelColor, fontSize = 13.sp)
             FilledTonalButton(
                 onClick = onCopy,
+                enabled = !copied,
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                 modifier = Modifier.height(30.dp)
             ) {
@@ -383,6 +385,7 @@ private fun RagMatchCard(
                 }
                 FilledTonalButton(
                     onClick = onCopy,
+                    enabled = !copied,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     modifier = Modifier.height(30.dp)
                 ) {
@@ -451,7 +454,7 @@ private fun InlineEditAnswer(
                 modifier = Modifier.weight(1f)
             )
             TextButton(
-                onClick = { answer = (answer + readClipboardText(context)) },
+                onClick = { answer = readClipboardText(context) },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
                 modifier = Modifier.height(28.dp)
             ) {
@@ -460,7 +463,7 @@ private fun InlineEditAnswer(
                 Text("粘贴回复", fontSize = 11.sp)
             }
             TextButton(
-                onClick = { riskNote = (riskNote + readClipboardText(context)) },
+                onClick = { riskNote = readClipboardText(context) },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
                 modifier = Modifier.height(28.dp)
             ) {
