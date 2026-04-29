@@ -37,6 +37,7 @@ import com.xingshu.helper.service.CaptureCoordinator
 import com.xingshu.helper.service.FloatingBallService
 import com.xingshu.helper.service.ScreenCaptureService
 import com.xingshu.helper.ui.theme.XingShuTheme
+import com.xingshu.helper.update.UpdateBanner
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -109,7 +110,9 @@ class MainActivity : ComponentActivity() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(8.dp))
+                    UpdateBanner()
+                    Spacer(Modifier.height(16.dp))
 
                     if (hasPermission) {
                         PermissionGranted()

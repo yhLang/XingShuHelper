@@ -12,6 +12,12 @@ val localProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 val dashscopeApiKey: String = localProps.getProperty("DASHSCOPE_API_KEY", "")
+val githubOwner: String = localProps.getProperty("GITHUB_OWNER", "")
+val githubRepo: String = localProps.getProperty("GITHUB_REPO", "")
+
+// 版本号：默认值；CI 通过 -PversionName / -PversionCode 注入实际值
+val ciVersionName: String = (project.findProperty("versionName") as String?) ?: "1.0.0"
+val ciVersionCode: Int = ((project.findProperty("versionCode") as String?)?.toIntOrNull()) ?: 1
 
 android {
     namespace = "com.xingshu.helper"
@@ -21,17 +27,34 @@ android {
         applicationId = "com.xingshu.helper"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = ciVersionCode
+        versionName = ciVersionName
 
-        // 注入到 BuildConfig.DASHSCOPE_API_KEY，运行时由 AppConfig 读取
+        // 注入到 BuildConfig，运行时读取
         buildConfigField("String", "DASHSCOPE_API_KEY", "\"$dashscopeApiKey\"")
+        buildConfigField("String", "GITHUB_OWNER", "\"$githubOwner\"")
+        buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
+    }
+
+    signingConfigs {
+        create("release") {
+            val storeFilePath = project.findProperty("releaseStoreFile") as String?
+            if (storeFilePath != null) {
+                storeFile = file(storeFilePath)
+                storePassword = project.findProperty("releaseStorePassword") as String?
+                keyAlias = project.findProperty("releaseKeyAlias") as String?
+                keyPassword = project.findProperty("releaseKeyPassword") as String?
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (project.hasProperty("releaseStoreFile")) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
