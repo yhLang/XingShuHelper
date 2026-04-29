@@ -7,7 +7,10 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * 进程级单例，用于在 ScreenCaptureService 与 UI（Activity / ViewModel）之间传递截屏结果。
+ * 进程级单例，承担两件事：
+ *   1. 在 ScreenCaptureService 与 UI（Activity / ViewModel）之间传递截屏结果
+ *   2. 暴露当前 MediaProjection 是否仍有效，让调用方可以决定走"复用"还是"重新授权"
+ *
  * 用 SharedFlow 是为了支持多消费者（PanelViewModel 主消费 + MainActivity POC 调试），
  * 每个订阅者都能看到事件。
  */
@@ -18,7 +21,6 @@ object CaptureCoordinator {
         data class Error(val message: String) : Event()
     }
 
-    // replay=0：晚启动的订阅者不重放历史；extraBufferCapacity 给瞬时多事件留点缓冲
     private val _events = MutableSharedFlow<Event>(replay = 0, extraBufferCapacity = 4)
     val events: SharedFlow<Event> = _events
 
@@ -35,5 +37,13 @@ object CaptureCoordinator {
 
     fun setCapturing(value: Boolean) {
         _isCapturing.value = value
+    }
+
+    /** ScreenCaptureService 当前是否持有有效的 MediaProjection（可以复用免授权） */
+    private val _hasActiveProjection = MutableStateFlow(false)
+    val hasActiveProjection: StateFlow<Boolean> = _hasActiveProjection
+
+    fun setActiveProjection(value: Boolean) {
+        _hasActiveProjection.value = value
     }
 }

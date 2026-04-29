@@ -162,10 +162,10 @@ class MainActivity : ComponentActivity() {
             }
             Toast.makeText(
                 context,
-                "已授权，3 秒后自动截屏，请立即切到要识别的微信对话",
+                "已授权，3 秒后截屏当前屏幕（请保持当前界面）",
                 Toast.LENGTH_LONG
             ).show()
-            val svcIntent = ScreenCaptureService.newIntent(
+            val svcIntent = ScreenCaptureService.newStartIntent(
                 context, result.resultCode, result.data!!, delayMs = 3000L
             )
             context.startForegroundService(svcIntent)

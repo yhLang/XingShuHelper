@@ -10,8 +10,9 @@ import androidx.activity.ComponentActivity
 /**
  * 透明 Activity，唯一职责：申请 MediaProjection 授权 → 启动 ScreenCaptureService → finish。
  *
- * Why: MediaProjection 授权弹窗只能从 Activity 触发；悬浮窗服务无法直接拉起。让面板按钮通过
- * NEW_TASK 启动这个透明 Activity，用户授权后立刻消失，体验上"几乎没看到 Activity"。
+ * Why: MediaProjection 授权弹窗只能从 Activity 触发；悬浮窗服务无法直接拉起。
+ * 仅在"首次"或"projection 已被系统/用户撤销"的场景下才需要走这个 Activity；
+ * 后续截屏直接复用 ScreenCaptureService 持有的 projection 实例，零交互。
  */
 class ProjectionRequestActivity : ComponentActivity() {
 
@@ -19,14 +20,9 @@ class ProjectionRequestActivity : ComponentActivity() {
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
-            Toast.makeText(
-                this,
-                "已授权，3 秒后自动截屏，请立即切到要识别的对话",
-                Toast.LENGTH_LONG
-            ).show()
-            val svc = ScreenCaptureService.newIntent(
+            val svc = ScreenCaptureService.newStartIntent(
                 this, result.resultCode, result.data!!,
-                delayMs = intent.getLongExtra(EXTRA_DELAY_MS, 3000L)
+                delayMs = intent.getLongExtra(EXTRA_DELAY_MS, 500L)
             )
             startForegroundService(svc)
         } else {
@@ -34,6 +30,7 @@ class ProjectionRequestActivity : ComponentActivity() {
             Toast.makeText(this, "未授权截屏", Toast.LENGTH_SHORT).show()
         }
         finish()
+        overridePendingTransition(0, 0)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,7 +43,7 @@ class ProjectionRequestActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_DELAY_MS = "extra_delay_ms"
 
-        fun newIntent(context: Context, delayMs: Long = 3000L): Intent {
+        fun newIntent(context: Context, delayMs: Long = 500L): Intent {
             return Intent(context, ProjectionRequestActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)

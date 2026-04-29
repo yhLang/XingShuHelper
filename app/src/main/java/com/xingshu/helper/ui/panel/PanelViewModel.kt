@@ -70,9 +70,19 @@ class PanelViewModel(
     }
 
     fun startScreenCapture() {
-        // 先关掉面板，避免悬浮窗出现在截图里挡住对话
+        // 先关掉面板，让面板下面的微信对话暴露给截屏
         _events.tryEmit(PanelEvent.HidePanel)
-        appContext.startActivity(ProjectionRequestActivity.newIntent(appContext, delayMs = 3000L))
+
+        if (CaptureCoordinator.hasActiveProjection.value) {
+            // 已授权过：直接复用 projection，500ms 延时只是给面板隐藏留点缓冲
+            CaptureCoordinator.setCapturing(true)
+            val intent = com.xingshu.helper.service.ScreenCaptureService
+                .newCaptureAgainIntent(appContext, delayMs = 500L)
+            appContext.startForegroundService(intent)
+        } else {
+            // 首次或 projection 已失效：走授权流程
+            appContext.startActivity(ProjectionRequestActivity.newIntent(appContext, delayMs = 500L))
+        }
     }
 
     private fun runOcr(bitmap: android.graphics.Bitmap) {
@@ -95,30 +105,37 @@ class PanelViewModel(
     }
 
     private fun applyDialogMessages(messages: List<DialogMessage>) {
+        android.util.Log.d(
+            "PanelViewModel",
+            "applyDialogMessages: total=${messages.size}, " +
+                "customer=${messages.count { it.role == DialogRole.CUSTOMER }}, " +
+                "me=${messages.count { it.role == DialogRole.ME }}"
+        )
         if (messages.isEmpty()) {
-            showSnackbar("未识别到对话内容")
+            // 不动 basket，但提示用户结果为空
+            _state.update { it.copy(dialogMessages = emptyList()) }
+            showSnackbar("未识别到对话内容（截图可能未抓到聊天界面）")
             return
         }
-        // POC 阶段策略：把客户消息追加到 basket，最多保留 10 条
         val customerTexts = messages
             .filter { it.role == DialogRole.CUSTOMER }
             .map { it.text }
+            .distinct()
+            .takeLast(10)
         if (customerTexts.isEmpty()) {
-            showSnackbar("仅识别到自己发的消息")
+            _state.update { it.copy(dialogMessages = messages) }
+            showSnackbar("识别 ${messages.size} 条对话，但都是我自己发的")
             return
         }
+        // 每次 OCR 视为"重新抓取本轮上下文"——清空旧 basket，灌入新客户消息
         _state.update { state ->
-            val existing = state.basket.map { it.content }.toSet()
-            val newItems = customerTexts
-                .filter { it !in existing }
-                .take(10 - state.basket.size)
-                .map { BasketMessage(content = it) }
             state.copy(
-                basket = state.basket + newItems,
-                dialogMessages = messages
+                basket = customerTexts.map { BasketMessage(content = it) },
+                dialogMessages = messages,
+                visionState = VisionState.Idle
             )
         }
-        showSnackbar("已识别 ${messages.size} 条，加入客户消息 ${_state.value.basket.size} 条")
+        showSnackbar("识别 ${messages.size} 条对话，客户消息 ${customerTexts.size} 条已加入本轮")
     }
 
     fun clearVisionState() {

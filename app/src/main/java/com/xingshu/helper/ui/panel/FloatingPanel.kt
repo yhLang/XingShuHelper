@@ -173,6 +173,7 @@ private fun MainContent(state: PanelUiState, viewModel: PanelViewModel) {
 @Composable
 private fun CaptureSection(state: PanelUiState, viewModel: PanelViewModel, isLoading: Boolean) {
     val isCapturing by CaptureCoordinator.isCapturing.collectAsState()
+    val hasProjection by CaptureCoordinator.hasActiveProjection.collectAsState()
     val isVisionLoading = state.visionState is VisionState.Loading
     val busy = isCapturing || isVisionLoading || isLoading
 
@@ -191,7 +192,11 @@ private fun CaptureSection(state: PanelUiState, viewModel: PanelViewModel, isLoa
             color = MaterialTheme.colorScheme.onPrimaryContainer
         )
         Text(
-            "授权后 3 秒倒计时，期间切到要识别的微信对话窗口",
+            text = if (hasProjection) {
+                "已授权，点击直接抓取下方微信对话"
+            } else {
+                "首次需授权截屏，之后可一键直抓"
+            },
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onPrimaryContainer
         )
@@ -202,15 +207,15 @@ private fun CaptureSection(state: PanelUiState, viewModel: PanelViewModel, isLoa
         ) {
             Text(
                 when {
-                    isCapturing && !isVisionLoading -> "等待截屏…（请切到微信）"
+                    isCapturing && !isVisionLoading -> "正在截屏…"
                     isVisionLoading -> "正在识别对话…"
-                    else -> "开始截屏识别"
+                    else -> "截屏识别"
                 }
             )
         }
         if (state.dialogMessages.isNotEmpty()) {
             Text(
-                "上次识别：${state.dialogMessages.size} 条对话（客户 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.CUSTOMER }} / 我 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.ME }}）",
+                "上次识别：${state.dialogMessages.size} 条（客户 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.CUSTOMER }} / 我 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.ME }}）",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )

@@ -20,32 +20,27 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import java.io.File
+import java.io.FileOutputStream
 
 /**
- * 一次性截屏服务。生命周期短：启动 → 拉起 MediaProjection → 延迟若干毫秒 → 抓一帧 → 通过
- * CaptureCoordinator 投递 Bitmap → stopSelf。
+ * 长驻的截屏服务。一次授权 -> 多次截屏复用同一个 MediaProjection 实例。
  *
- * Why: Android 14+ 要求 getMediaProjection 之前必须有 mediaProjection 类型的前台服务在运行。
- * 把它独立成一个短命服务而不是塞进 FloatingBallService，是因为：
- *   1. 截屏权限敏感，按需启用减少长期持有
- *   2. 隔离 MediaProjection 失效回调，不会影响悬浮球
+ * 命令模式（通过 Intent action 区分）：
+ *   - ACTION_START_AND_CAPTURE：携带 resultCode/data，建立 projection 并立即排一次截屏
+ *   - ACTION_CAPTURE_AGAIN：复用已有 projection 排一次截屏（免授权）
+ *   - ACTION_STOP：主动释放 projection，停止服务
  */
 class ScreenCaptureService : Service() {
 
     private var projection: MediaProjection? = null
-    private var virtualDisplay: VirtualDisplay? = null
-    private var imageReader: ImageReader? = null
     private var handlerThread: HandlerThread? = null
-    private var captured = false
+    private var handler: Handler? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent == null) {
-            stopSelfWithError("启动参数缺失")
-            return START_NOT_STICKY
-        }
-
+    override fun onCreate() {
+        super.onCreate()
         ensureChannel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
@@ -57,77 +52,136 @@ class ScreenCaptureService : Service() {
             startForeground(NOTIFICATION_ID, buildNotification())
         }
 
+        val ht = HandlerThread("xingshu-capture").apply { start() }
+        handlerThread = ht
+        handler = Handler(ht.looper)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_START_AND_CAPTURE -> handleStartAndCapture(intent)
+            ACTION_CAPTURE_AGAIN -> handleCaptureAgain(intent)
+            ACTION_STOP -> {
+                Log.d(TAG, "ACTION_STOP")
+                cleanupProjection()
+                stopSelf()
+            }
+            else -> Log.w(TAG, "unknown action: ${intent?.action}")
+        }
+        return START_NOT_STICKY
+    }
+
+    private fun handleStartAndCapture(intent: Intent) {
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
         @Suppress("DEPRECATION")
         val data: Intent? = intent.getParcelableExtra(EXTRA_DATA)
         val delayMs = intent.getLongExtra(EXTRA_DELAY_MS, DEFAULT_DELAY_MS)
 
         if (data == null || resultCode == 0) {
-            stopSelfWithError("授权数据缺失")
-            return START_NOT_STICKY
+            postError("授权数据缺失")
+            return
         }
 
         val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val proj = try {
             mgr.getMediaProjection(resultCode, data)
         } catch (e: Exception) {
-            stopSelfWithError("获取 MediaProjection 失败：${e.message}")
-            return START_NOT_STICKY
+            postError("获取 MediaProjection 失败：${e.message}")
+            return
         }
-        projection = proj
 
-        val ht = HandlerThread("xingshu-capture").apply { start() }
-        handlerThread = ht
-        val handler = Handler(ht.looper)
-
-        // Android 14+ 要求 createVirtualDisplay 前必须注册 Callback
         proj.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
-                Log.d(TAG, "MediaProjection.onStop")
+                Log.d(TAG, "MediaProjection.onStop (用户撤销或系统终止)")
+                projection = null
+                CaptureCoordinator.setActiveProjection(false)
             }
         }, handler)
 
-        handler.postDelayed({ doCapture(proj, handler) }, delayMs)
-        return START_NOT_STICKY
+        projection = proj
+        CaptureCoordinator.setActiveProjection(true)
+        Log.d(TAG, "projection established, scheduling capture in ${delayMs}ms")
+
+        handler?.postDelayed({ captureOne() }, delayMs)
     }
 
-    private fun doCapture(proj: MediaProjection, handler: Handler) {
+    private fun handleCaptureAgain(intent: Intent) {
+        val delayMs = intent.getLongExtra(EXTRA_DELAY_MS, DEFAULT_DELAY_MS)
+        if (projection == null) {
+            postError("MediaProjection 已失效，请重新授权")
+            CaptureCoordinator.setActiveProjection(false)
+            return
+        }
+        Log.d(TAG, "reusing projection, scheduling capture in ${delayMs}ms")
+        handler?.postDelayed({ captureOne() }, delayMs)
+    }
+
+    private fun captureOne() {
+        val proj = projection
+        val h = handler
+        if (proj == null || h == null) {
+            postError("服务状态异常，无法截屏")
+            return
+        }
+
         val metrics = resources.displayMetrics
         val w = metrics.widthPixels
-        val h = metrics.heightPixels
+        val h2 = metrics.heightPixels
         val density = metrics.densityDpi
 
-        val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
-        imageReader = reader
+        val reader = ImageReader.newInstance(w, h2, PixelFormat.RGBA_8888, 3)
+        var virtualDisplay: VirtualDisplay? = null
+        var captured = false
+        var frameCount = 0
 
         reader.setOnImageAvailableListener({ r ->
             if (captured) return@setOnImageAvailableListener
             val img = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+            frameCount++
+            // 跳过第一帧（VirtualDisplay 刚建立时画面可能未稳定 / 黑屏）
+            if (frameCount < 2) {
+                img.close()
+                return@setOnImageAvailableListener
+            }
             captured = true
             try {
-                val bitmap = imageToBitmap(img, w, h)
+                val bitmap = imageToBitmap(img, w, h2)
+                Log.d(TAG, "captured frame#$frameCount: ${bitmap.width}x${bitmap.height}")
+                debugSaveBitmap(bitmap)
                 CaptureCoordinator.postSuccess(bitmap)
             } catch (e: Exception) {
                 Log.e(TAG, "imageToBitmap failed", e)
                 CaptureCoordinator.postError("截屏转 Bitmap 失败：${e.message}")
             } finally {
                 img.close()
-                cleanup()
-                stopSelf()
+                try { virtualDisplay?.release() } catch (_: Exception) {}
+                try { reader.close() } catch (_: Exception) {}
+                CaptureCoordinator.setCapturing(false)
             }
-        }, handler)
+        }, h)
 
         try {
             virtualDisplay = proj.createVirtualDisplay(
-                "xingshu-capture", w, h, density,
+                "xingshu-capture", w, h2, density,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                reader.surface, null, handler
+                reader.surface, null, h
             )
         } catch (e: Exception) {
             Log.e(TAG, "createVirtualDisplay failed", e)
-            CaptureCoordinator.postError("创建虚拟显示失败：${e.message}")
-            cleanup()
-            stopSelf()
+            postError("创建虚拟显示失败：${e.message}")
+            try { reader.close() } catch (_: Exception) {}
+        }
+    }
+
+    private fun debugSaveBitmap(bitmap: Bitmap) {
+        // 仅 debug 用：把每次截图存到 cacheDir/captures，方便事后排查识别效果
+        try {
+            val dir = File(cacheDir, "captures").apply { mkdirs() }
+            val file = File(dir, "cap_${System.currentTimeMillis()}.jpg")
+            FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            Log.d(TAG, "saved debug capture: ${file.absolutePath}")
+        } catch (e: Exception) {
+            Log.w(TAG, "saveDebugBitmap failed", e)
         }
     }
 
@@ -143,27 +197,23 @@ class ScreenCaptureService : Service() {
         return if (rowPadding == 0) raw else Bitmap.createBitmap(raw, 0, 0, w, h)
     }
 
-    private fun stopSelfWithError(msg: String) {
-        Log.w(TAG, "stopSelfWithError: $msg")
+    private fun postError(msg: String) {
+        Log.w(TAG, "postError: $msg")
         CaptureCoordinator.postError(msg)
-        cleanup()
-        stopSelf()
-    }
-
-    private fun cleanup() {
-        try { virtualDisplay?.release() } catch (_: Exception) {}
-        try { imageReader?.close() } catch (_: Exception) {}
-        try { projection?.stop() } catch (_: Exception) {}
-        virtualDisplay = null
-        imageReader = null
-        projection = null
-        handlerThread?.quitSafely()
-        handlerThread = null
         CaptureCoordinator.setCapturing(false)
     }
 
+    private fun cleanupProjection() {
+        try { projection?.stop() } catch (_: Exception) {}
+        projection = null
+        CaptureCoordinator.setActiveProjection(false)
+    }
+
     override fun onDestroy() {
-        cleanup()
+        cleanupProjection()
+        handlerThread?.quitSafely()
+        handlerThread = null
+        handler = null
         super.onDestroy()
     }
 
@@ -178,8 +228,8 @@ class ScreenCaptureService : Service() {
 
     private fun buildNotification(): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("正在识别屏幕")
-            .setContentText("助手正在抓取当前屏幕内容用于客服回复生成")
+            .setContentTitle("行恕助手 · 屏幕识别就绪")
+            .setContentText("已授权截屏，下次识别可直接复用，无需再次确认")
             .setSmallIcon(android.R.drawable.ic_menu_edit)
             .setOngoing(true)
             .setSilent(true)
@@ -189,18 +239,38 @@ class ScreenCaptureService : Service() {
         private const val TAG = "ScreenCaptureService"
         private const val CHANNEL_ID = "xingshu_capture"
         private const val NOTIFICATION_ID = 2
-        private const val DEFAULT_DELAY_MS = 3_000L
+        private const val DEFAULT_DELAY_MS = 5_000L
+
+        const val ACTION_START_AND_CAPTURE = "com.xingshu.helper.START_AND_CAPTURE"
+        const val ACTION_CAPTURE_AGAIN = "com.xingshu.helper.CAPTURE_AGAIN"
+        const val ACTION_STOP = "com.xingshu.helper.STOP_CAPTURE"
 
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_DATA = "extra_data"
         const val EXTRA_DELAY_MS = "extra_delay_ms"
 
-        fun newIntent(context: Context, resultCode: Int, data: Intent, delayMs: Long): Intent {
+        fun newStartIntent(context: Context, resultCode: Int, data: Intent, delayMs: Long): Intent {
             return Intent(context, ScreenCaptureService::class.java).apply {
+                action = ACTION_START_AND_CAPTURE
                 putExtra(EXTRA_RESULT_CODE, resultCode)
                 putExtra(EXTRA_DATA, data)
                 putExtra(EXTRA_DELAY_MS, delayMs)
             }
         }
+
+        fun newCaptureAgainIntent(context: Context, delayMs: Long): Intent {
+            return Intent(context, ScreenCaptureService::class.java).apply {
+                action = ACTION_CAPTURE_AGAIN
+                putExtra(EXTRA_DELAY_MS, delayMs)
+            }
+        }
+
+        fun newStopIntent(context: Context): Intent {
+            return Intent(context, ScreenCaptureService::class.java).apply { action = ACTION_STOP }
+        }
+
+        // 旧入口保留，给 MainActivity 调试用（首次授权 + 截屏）
+        fun newIntent(context: Context, resultCode: Int, data: Intent, delayMs: Long): Intent =
+            newStartIntent(context, resultCode, data, delayMs)
     }
 }
