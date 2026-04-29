@@ -13,6 +13,7 @@ import com.xingshu.helper.data.model.DialogMessage
 import com.xingshu.helper.data.model.DialogRole
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
+import com.xingshu.helper.data.model.QAItem
 import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
 import com.xingshu.helper.data.repository.EmbeddingRepository
@@ -39,7 +40,12 @@ data class PanelUiState(
     val visionState: VisionState = VisionState.Idle,
     val account: BusinessAccount = BusinessAccount.KIRIN,
     val corpusReady: Boolean = false,
+    /** 上一次生成时检索到的参考话术（按相似度降序），用于结果页"参考来源"展示。 */
+    val referencedQas: List<ReferencedQa> = emptyList(),
 )
+
+/** 一条 RAG 检索结果，带相似度分数（0-1，越大越相似）。 */
+data class ReferencedQa(val item: QAItem, val score: Float)
 
 enum class ClipboardStatus { EMPTY, OK, DUPLICATE, TOO_LONG }
 
@@ -276,11 +282,20 @@ class PanelViewModel(
         }
     }
 
-    private suspend fun retrieveContext(query: String): List<com.xingshu.helper.data.model.QAItem> {
-        if (!vectorStore.isReady || query.isBlank()) return emptyList()
+    private suspend fun retrieveContext(query: String): List<QAItem> {
+        if (!vectorStore.isReady || query.isBlank()) {
+            _state.update { it.copy(referencedQas = emptyList()) }
+            return emptyList()
+        }
         val queryVec = embeddingRepository.embed(query, AppConfig.API_KEY, AppConfig.API_BASE_URL)
-            ?: return emptyList()
-        return vectorStore.search(queryVec, topK = 5).map { (item, _) -> item }
+        if (queryVec == null) {
+            _state.update { it.copy(referencedQas = emptyList()) }
+            return emptyList()
+        }
+        val hits = vectorStore.search(queryVec, topK = 5)
+        // 把检索结果（带分数）写入 state，UI 在结果页展示
+        _state.update { it.copy(referencedQas = hits.map { (item, score) -> ReferencedQa(item, score) }) }
+        return hits.map { (item, _) -> item }
     }
 
     private fun collectGenerateState(state: GenerateState) {
