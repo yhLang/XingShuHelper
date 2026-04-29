@@ -6,13 +6,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.xingshu.helper.AppConfig
+import com.xingshu.helper.data.account.AccountManager
+import com.xingshu.helper.data.account.BusinessAccount
 import com.xingshu.helper.data.model.BasketMessage
 import com.xingshu.helper.data.model.DialogMessage
 import com.xingshu.helper.data.model.DialogRole
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
+import com.xingshu.helper.data.model.QAItem
 import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
+import com.xingshu.helper.data.repository.EmbeddingRepository
+import com.xingshu.helper.data.repository.QACorpusLoader
+import com.xingshu.helper.data.repository.VectorStore
 import com.xingshu.helper.data.repository.VisionRepository
 import com.xingshu.helper.service.CaptureCoordinator
 import com.xingshu.helper.service.ProjectionRequestActivity
@@ -31,8 +37,15 @@ data class PanelUiState(
     val currentScreen: PanelScreen = PanelScreen.MAIN,
     val snackbar: String? = null,
     val dialogMessages: List<DialogMessage> = emptyList(),
-    val visionState: VisionState = VisionState.Idle
+    val visionState: VisionState = VisionState.Idle,
+    val account: BusinessAccount = BusinessAccount.KIRIN,
+    val corpusReady: Boolean = false,
+    /** 上一次生成时检索到的参考话术（按相似度降序），用于结果页"参考来源"展示。 */
+    val referencedQas: List<ReferencedQa> = emptyList(),
 )
+
+/** 一条 RAG 检索结果，带相似度分数（0-1，越大越相似）。 */
+data class ReferencedQa(val item: QAItem, val score: Float)
 
 enum class ClipboardStatus { EMPTY, OK, DUPLICATE, TOO_LONG }
 
@@ -44,16 +57,27 @@ sealed class PanelEvent {
 class PanelViewModel(
     private val aiRepository: AIRepository,
     private val visionRepository: VisionRepository,
+    private val embeddingRepository: EmbeddingRepository,
+    private val vectorStore: VectorStore,
+    private val accountManager: AccountManager,
     private val appContext: Context
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(PanelUiState())
+    private val _state = MutableStateFlow(PanelUiState(account = accountManager.current.value))
     val uiState: StateFlow<PanelUiState> = _state
 
     private val _events = MutableSharedFlow<PanelEvent>(extraBufferCapacity = 4)
     val events: SharedFlow<PanelEvent> = _events
 
     init {
+        // 监听账号切换，每次切换都重新加载对应语料库
+        viewModelScope.launch {
+            accountManager.current.collect { account ->
+                _state.update { it.copy(account = account, corpusReady = false) }
+                loadCorpus(account)
+            }
+        }
+
         // 监听 ScreenCaptureService 的截屏结果，自动跑 OCR 并写入对话状态
         viewModelScope.launch {
             CaptureCoordinator.events.collect { event ->
@@ -70,9 +94,19 @@ class PanelViewModel(
     }
 
     fun startScreenCapture() {
-        // 先关掉面板，避免悬浮窗出现在截图里挡住对话
+        // 先关掉面板，让面板下面的微信对话暴露给截屏
         _events.tryEmit(PanelEvent.HidePanel)
-        appContext.startActivity(ProjectionRequestActivity.newIntent(appContext, delayMs = 3000L))
+
+        if (CaptureCoordinator.hasActiveProjection.value) {
+            // 已授权过：直接复用 projection，500ms 延时只是给面板隐藏留点缓冲
+            CaptureCoordinator.setCapturing(true)
+            val intent = com.xingshu.helper.service.ScreenCaptureService
+                .newCaptureAgainIntent(appContext, delayMs = 500L)
+            appContext.startForegroundService(intent)
+        } else {
+            // 首次或 projection 已失效：走授权流程
+            appContext.startActivity(ProjectionRequestActivity.newIntent(appContext, delayMs = 500L))
+        }
     }
 
     private fun runOcr(bitmap: android.graphics.Bitmap) {
@@ -95,34 +129,64 @@ class PanelViewModel(
     }
 
     private fun applyDialogMessages(messages: List<DialogMessage>) {
+        val customerCount = messages.count { it.role == DialogRole.CUSTOMER }
+        val meCount = messages.count { it.role == DialogRole.ME }
+        android.util.Log.d(
+            "PanelViewModel",
+            "applyDialogMessages: total=${messages.size}, customer=$customerCount, me=$meCount"
+        )
         if (messages.isEmpty()) {
-            showSnackbar("未识别到对话内容")
+            _state.update { it.copy(dialogMessages = emptyList(), visionState = VisionState.Idle) }
+            showSnackbar("未识别到对话内容（截图可能未抓到聊天界面）")
             return
         }
-        // POC 阶段策略：把客户消息追加到 basket，最多保留 10 条
-        val customerTexts = messages
-            .filter { it.role == DialogRole.CUSTOMER }
-            .map { it.text }
-        if (customerTexts.isEmpty()) {
-            showSnackbar("仅识别到自己发的消息")
-            return
-        }
-        _state.update { state ->
-            val existing = state.basket.map { it.content }.toSet()
-            val newItems = customerTexts
-                .filter { it !in existing }
-                .take(10 - state.basket.size)
-                .map { BasketMessage(content = it) }
-            state.copy(
-                basket = state.basket + newItems,
-                dialogMessages = messages
+        // OCR 模式：dialogMessages 是单一真源，UI 直接渲染气泡
+        // 清空 basket 是为了让 UI 切到 dialog 视图，不再显示残留的剪贴板条目
+        _state.update {
+            it.copy(
+                dialogMessages = messages,
+                basket = emptyList(),
+                visionState = VisionState.Idle
             )
         }
-        showSnackbar("已识别 ${messages.size} 条，加入客户消息 ${_state.value.basket.size} 条")
+        showSnackbar("已识别 ${messages.size} 条对话（客户 $customerCount / 我 $meCount）")
+    }
+
+    private suspend fun loadCorpus(account: BusinessAccount) {
+        try {
+            val corpus = QACorpusLoader(appContext).load(account)
+            vectorStore.initialize(corpus)
+            _state.update { it.copy(corpusReady = true) }
+            android.util.Log.d("PanelViewModel", "RAG 语料库加载完成 [${account.key}]: ${corpus.size} 条")
+        } catch (e: Exception) {
+            _state.update { it.copy(corpusReady = false) }
+            android.util.Log.e("PanelViewModel", "RAG 语料库加载失败 [${account.key}]: ${e.message}")
+        }
+    }
+
+    fun switchAccount(account: BusinessAccount) {
+        if (account == accountManager.current.value) return
+        accountManager.set(account)
+        showSnackbar("已切换到 ${account.displayName}，正在加载话术库…")
     }
 
     fun clearVisionState() {
         _state.update { it.copy(visionState = VisionState.Idle, dialogMessages = emptyList()) }
+    }
+
+    /** 用户手动删除某条 OCR 出来的对话（索引基础） */
+    fun removeDialogMessage(index: Int) {
+        _state.update { state ->
+            val list = state.dialogMessages
+            if (index !in list.indices) state else state.copy(
+                dialogMessages = list.toMutableList().apply { removeAt(index) }
+            )
+        }
+    }
+
+    /** 清空 OCR 对话上下文，回到剪贴板手动模式 */
+    fun clearDialog() {
+        _state.update { it.copy(dialogMessages = emptyList(), basket = emptyList()) }
     }
 
     fun readClipboard() {
@@ -169,6 +233,12 @@ class PanelViewModel(
     }
 
     fun generateSingle() {
+        // 有 OCR 对话上下文优先走对话路径（带"我"的历史回复），更准确
+        val dialog = _state.value.dialogMessages
+        if (dialog.isNotEmpty()) {
+            doGenerateFromDialog(dialog)
+            return
+        }
         val text = _state.value.clipboardPreview
         if (text.isBlank()) {
             showSnackbar("剪贴板为空，请先在微信复制客户消息")
@@ -178,6 +248,12 @@ class PanelViewModel(
     }
 
     fun generateFromBasket() {
+        // 有 OCR 对话上下文优先走对话路径
+        val dialog = _state.value.dialogMessages
+        if (dialog.isNotEmpty()) {
+            doGenerateFromDialog(dialog)
+            return
+        }
         val messages = _state.value.basket.map { it.content }
         if (messages.isEmpty()) {
             showSnackbar("本轮还没有收集消息")
@@ -188,13 +264,44 @@ class PanelViewModel(
 
     private fun doGenerate(messages: List<String>) {
         viewModelScope.launch {
-            aiRepository.generate(messages, AppConfig.API_KEY, AppConfig.API_BASE_URL)
-                .collect { state ->
-                    _state.update { it.copy(generateState = state) }
-                    if (state is GenerateState.Success || state is GenerateState.Error) {
-                        _state.update { it.copy(currentScreen = PanelScreen.RESULT) }
-                    }
-                }
+            val contextItems = retrieveContext(messages.joinToString("\n"))
+            aiRepository.generate(messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems)
+                .collect { collectGenerateState(it) }
+        }
+    }
+
+    private fun doGenerateFromDialog(dialog: List<DialogMessage>) {
+        viewModelScope.launch {
+            // 检索时只用客户那边的话，否则会把"我"的旧回复混进 RAG query 影响相似度
+            val customerOnly = dialog.filter { it.role == DialogRole.CUSTOMER }
+                .joinToString("\n") { it.text }
+            val contextItems = retrieveContext(customerOnly)
+            aiRepository.generateFromDialog(
+                dialog, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
+            ).collect { collectGenerateState(it) }
+        }
+    }
+
+    private suspend fun retrieveContext(query: String): List<QAItem> {
+        if (!vectorStore.isReady || query.isBlank()) {
+            _state.update { it.copy(referencedQas = emptyList()) }
+            return emptyList()
+        }
+        val queryVec = embeddingRepository.embed(query, AppConfig.API_KEY, AppConfig.API_BASE_URL)
+        if (queryVec == null) {
+            _state.update { it.copy(referencedQas = emptyList()) }
+            return emptyList()
+        }
+        val hits = vectorStore.search(queryVec, topK = 5)
+        // 把检索结果（带分数）写入 state，UI 在结果页展示
+        _state.update { it.copy(referencedQas = hits.map { (item, score) -> ReferencedQa(item, score) }) }
+        return hits.map { (item, _) -> item }
+    }
+
+    private fun collectGenerateState(state: GenerateState) {
+        _state.update { it.copy(generateState = state) }
+        if (state is GenerateState.Success || state is GenerateState.Error) {
+            _state.update { it.copy(currentScreen = PanelScreen.RESULT) }
         }
     }
 
@@ -216,6 +323,9 @@ class PanelViewModel(
             return PanelViewModel(
                 AIRepository(),
                 VisionRepository(),
+                EmbeddingRepository(),
+                VectorStore(),
+                AccountManager(context.applicationContext),
                 context.applicationContext
             ) as T
         }

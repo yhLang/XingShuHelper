@@ -26,6 +26,7 @@ import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.ui.panel.PanelUiState
 import com.xingshu.helper.ui.panel.PanelViewModel
+import com.xingshu.helper.ui.panel.ReferencedQa
 
 @Composable
 fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
@@ -114,6 +115,10 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                 }
 
                 item { MetaInfo(result = result) }
+
+                if (state.referencedQas.isNotEmpty()) {
+                    item { ReferenceSources(items = state.referencedQas) }
+                }
 
                 item {
                     OutlinedButton(
@@ -246,4 +251,72 @@ private fun MetaRow(label: String, value: String, isWarning: Boolean = false) {
 private fun copyText(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("reply", text))
+}
+
+@Composable
+private fun ReferenceSources(items: List<ReferencedQa>) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "参考话术（${items.size} 条历史对话）",
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {
+                Text(if (expanded) "收起" else "展开", fontSize = 12.sp)
+            }
+        }
+        if (expanded) {
+            items.forEachIndexed { idx, ref ->
+                val q = ref.item
+                val question = q.questions.firstOrNull().orEmpty()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${idx + 1}. [${q.scene}]",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "相似度 ${"%.2f".format(ref.score)}",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = "Q：$question",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        lineHeight = 16.sp
+                    )
+                    if (q.answer.isNotBlank()) {
+                        Text(
+                            text = "A：${q.answer}",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

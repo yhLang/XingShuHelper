@@ -9,9 +9,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.xingshu.helper.data.account.BusinessAccount
 
 @Composable
-fun SettingsContent() {
+fun SettingsContent(
+    currentAccount: BusinessAccount,
+    corpusReady: Boolean,
+    onSwitchAccount: (BusinessAccount) -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -19,6 +24,31 @@ fun SettingsContent() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
+        SectionTitle("业务账号")
+        Text(
+            "选择当前手机绑定的微信号。每个账号有独立的话术库，切换后会重新加载。",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            lineHeight = 18.sp
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            BusinessAccount.values().forEach { account ->
+                AccountRow(
+                    account = account,
+                    selected = account == currentAccount,
+                    onClick = { onSwitchAccount(account) }
+                )
+            }
+        }
+        Text(
+            text = if (corpusReady) "话术库已加载" else "话术库加载中…",
+            fontSize = 12.sp,
+            color = if (corpusReady) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        HorizontalDivider()
+
         SectionTitle("关于")
         Text(
             "行恕书画艺术培训中心专属 AI 客服助手\n版本 1.0.0\n\n回复由 AI 辅助生成，请确认内容准确后再发送。",
@@ -38,6 +68,41 @@ fun SettingsContent() {
         )
 
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun AccountRow(
+    account: BusinessAccount,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.medium,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            RadioButton(selected = selected, onClick = onClick)
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text(
+                    text = account.displayName,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+                Text(
+                    text = account.brandName,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 

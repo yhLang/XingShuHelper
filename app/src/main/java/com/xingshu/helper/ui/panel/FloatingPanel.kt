@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -21,6 +22,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xingshu.helper.data.model.BasketMessage
+import com.xingshu.helper.data.model.DialogMessage
+import com.xingshu.helper.data.model.DialogRole
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.data.model.VisionState
@@ -59,7 +62,11 @@ fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
                 when (state.currentScreen) {
                     PanelScreen.MAIN -> MainContent(state = state, viewModel = viewModel)
                     PanelScreen.RESULT -> ResultContent(state = state, viewModel = viewModel)
-                    PanelScreen.SETTINGS -> SettingsContent()
+                    PanelScreen.SETTINGS -> SettingsContent(
+                        currentAccount = state.account,
+                        corpusReady = state.corpusReady,
+                        onSwitchAccount = { viewModel.switchAccount(it) }
+                    )
                 }
 
                 state.snackbar?.let { msg ->
@@ -144,8 +151,34 @@ private fun MainContent(state: PanelUiState, viewModel: PanelViewModel) {
             ActionButtons(state = state, viewModel = viewModel, isLoading = isLoading)
         }
 
-        // Basket
-        if (state.basket.isNotEmpty()) {
+        // 优先显示 OCR 对话上下文（双向气泡），否则显示 basket（剪贴板手动流程）
+        if (state.dialogMessages.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val customerCount = state.dialogMessages.count { it.role == DialogRole.CUSTOMER }
+                    val meCount = state.dialogMessages.count { it.role == DialogRole.ME }
+                    Text(
+                        "对话上下文（客户 $customerCount / 我 $meCount）",
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(onClick = { viewModel.clearDialog() }, contentPadding = PaddingValues(0.dp)) {
+                        Text("清空", fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+            itemsIndexed(state.dialogMessages) { index, msg ->
+                DialogBubble(
+                    message = msg,
+                    onDelete = { viewModel.removeDialogMessage(index) }
+                )
+            }
+        } else if (state.basket.isNotEmpty()) {
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -173,6 +206,7 @@ private fun MainContent(state: PanelUiState, viewModel: PanelViewModel) {
 @Composable
 private fun CaptureSection(state: PanelUiState, viewModel: PanelViewModel, isLoading: Boolean) {
     val isCapturing by CaptureCoordinator.isCapturing.collectAsState()
+    val hasProjection by CaptureCoordinator.hasActiveProjection.collectAsState()
     val isVisionLoading = state.visionState is VisionState.Loading
     val busy = isCapturing || isVisionLoading || isLoading
 
@@ -191,7 +225,11 @@ private fun CaptureSection(state: PanelUiState, viewModel: PanelViewModel, isLoa
             color = MaterialTheme.colorScheme.onPrimaryContainer
         )
         Text(
-            "授权后 3 秒倒计时，期间切到要识别的微信对话窗口",
+            text = if (hasProjection) {
+                "已授权，点击直接抓取下方微信对话"
+            } else {
+                "首次需授权截屏，之后可一键直抓"
+            },
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onPrimaryContainer
         )
@@ -202,15 +240,15 @@ private fun CaptureSection(state: PanelUiState, viewModel: PanelViewModel, isLoa
         ) {
             Text(
                 when {
-                    isCapturing && !isVisionLoading -> "等待截屏…（请切到微信）"
+                    isCapturing && !isVisionLoading -> "正在截屏…"
                     isVisionLoading -> "正在识别对话…"
-                    else -> "开始截屏识别"
+                    else -> "截屏识别"
                 }
             )
         }
         if (state.dialogMessages.isNotEmpty()) {
             Text(
-                "上次识别：${state.dialogMessages.size} 条对话（客户 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.CUSTOMER }} / 我 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.ME }}）",
+                "上次识别：${state.dialogMessages.size} 条（客户 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.CUSTOMER }} / 我 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.ME }}）",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
@@ -265,7 +303,9 @@ private fun ClipboardSection(state: PanelUiState, viewModel: PanelViewModel, isL
 @Composable
 private fun ActionButtons(state: PanelUiState, viewModel: PanelViewModel, isLoading: Boolean) {
     val hasClipboard = state.clipboardStatus != ClipboardStatus.EMPTY
+    val hasDialog = state.dialogMessages.isNotEmpty()
     val hasBasket = state.basket.isNotEmpty()
+    val canGenerate = hasDialog || hasBasket
 
     if (isLoading) {
         Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
@@ -277,27 +317,94 @@ private fun ActionButtons(state: PanelUiState, viewModel: PanelViewModel, isLoad
         return
     }
 
+    // dialog 模式下，"加入本轮 / 单条生成" 这两个剪贴板按钮不再有意义 —— 隐藏掉
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = { viewModel.addToBasket() },
-                enabled = hasClipboard,
-                modifier = Modifier.weight(1f)
-            ) { Text("加入本轮") }
+        if (!hasDialog) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { viewModel.addToBasket() },
+                    enabled = hasClipboard,
+                    modifier = Modifier.weight(1f)
+                ) { Text("加入本轮") }
 
-            Button(
-                onClick = { viewModel.generateSingle() },
-                enabled = hasClipboard,
-                modifier = Modifier.weight(1f)
-            ) { Text("单条生成") }
+                Button(
+                    onClick = { viewModel.generateSingle() },
+                    enabled = hasClipboard,
+                    modifier = Modifier.weight(1f)
+                ) { Text("单条生成") }
+            }
+        }
+
+        val buttonLabel = when {
+            hasDialog -> "基于对话上下文生成回复（${state.dialogMessages.size} 条）"
+            else -> "生成综合回复（${state.basket.size} 条）"
         }
 
         Button(
             onClick = { viewModel.generateFromBasket() },
-            enabled = hasBasket,
+            enabled = canGenerate,
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-        ) { Text("生成综合回复（${state.basket.size} 条）") }
+        ) { Text(buttonLabel) }
+    }
+}
+
+@Composable
+private fun DialogBubble(message: DialogMessage, onDelete: () -> Unit) {
+    val isCustomer = message.role == DialogRole.CUSTOMER
+    val bubbleColor = if (isCustomer) {
+        MaterialTheme.colorScheme.surfaceVariant
+    } else {
+        Color(0xFFCEEAB5) // 微信绿，浅色一点便于阅读
+    }
+    val alignment = if (isCustomer) Alignment.CenterStart else Alignment.CenterEnd
+
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
+        Row(
+            modifier = Modifier.fillMaxWidth(0.92f),
+            horizontalArrangement = if (isCustomer) Arrangement.Start else Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (!isCustomer) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "删除",
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(bubbleColor)
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    if (isCustomer) "客户" else "我",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    message.text,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    color = Color(0xFF222222)
+                )
+            }
+            if (isCustomer) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "删除",
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
 

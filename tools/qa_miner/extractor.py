@@ -17,8 +17,8 @@ SCENE_TAGS = [
     "班型咨询", "孩子状态", "作品效果", "其他",
 ]
 
-SYSTEM_PROMPT = """你是话术挖掘助手。下方是家长与"行恕书院（麒麟斋）"客服的微信聊天记录。
-麒麟斋的业务包括：文化课补习（数学/语文/英语等）、书法（硬笔/毛笔）、国画、棋类（围棋/象棋）等。
+SYSTEM_PROMPT_TEMPLATE = """你是话术挖掘助手。下方是家长与"{agent_signature}"客服的微信聊天记录。
+{business_desc}
 
 任务：从聊天中提取真正的"业务咨询问答对"，作为 AI 客服的话术参考库。
 
@@ -95,7 +95,14 @@ def format_dialog(dialog: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def extract_qas(dialog: list[dict]) -> list[dict[str, Any]]:
+def build_system_prompt(agent_signature: str, business_desc: str) -> str:
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        agent_signature=agent_signature,
+        business_desc=business_desc,
+    )
+
+
+def extract_qas(dialog: list[dict], system_prompt: str) -> list[dict[str, Any]]:
     """调用 qwen-turbo 抽取问答对。失败返回空列表。"""
     if not dialog:
         return []
@@ -108,7 +115,7 @@ def extract_qas(dialog: list[dict]) -> list[dict[str, Any]]:
             tools=[EXTRACT_TOOL],
             tool_choice={"type": "function", "function": {"name": "extract_qas"}},
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
         )

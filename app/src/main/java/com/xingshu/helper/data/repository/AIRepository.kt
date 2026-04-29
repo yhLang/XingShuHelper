@@ -39,19 +39,55 @@ class AIRepository {
         apiKey: String,
         baseUrl: String,
         contextItems: List<QAItem> = emptyList()
+    ): Flow<GenerateState> {
+        val userContent = if (messages.size == 1) {
+            "客户消息：${messages[0]}"
+        } else {
+            "客户连续发来的消息（按顺序）：\n" +
+                    messages.mapIndexed { i, m -> "${i + 1}. $m" }.joinToString("\n")
+        }
+        return runChatCompletion(userContent, apiKey, baseUrl, contextItems)
+    }
+
+    /**
+     * 基于完整对话历史生成回复（OCR / 截屏识别后的主路径）。
+     * AI 能同时看到客户的话和"我"的话，对当前对话状态有上下文判断。
+     */
+    fun generateFromDialog(
+        dialog: List<com.xingshu.helper.data.model.DialogMessage>,
+        apiKey: String,
+        baseUrl: String,
+        contextItems: List<QAItem> = emptyList()
+    ): Flow<GenerateState> {
+        // 渲染成清晰的、按时间顺序的两人对话，[客户] / [我] 双前缀让模型分清说话方
+        val userContent = buildString {
+            appendLine("以下是与客户的最近微信对话（按时间从早到晚）：")
+            appendLine()
+            dialog.forEach { msg ->
+                val tag = when (msg.role) {
+                    com.xingshu.helper.data.model.DialogRole.CUSTOMER -> "[客户]"
+                    com.xingshu.helper.data.model.DialogRole.ME -> "[我]"
+                }
+                appendLine("$tag ${msg.text}")
+            }
+            appendLine()
+            appendLine("请基于完整对话上下文，为客户最后一句（或最近未回复的消息）生成回复草稿。")
+            appendLine("注意：参考[我]已经说过的话，不要重复或自相矛盾。")
+        }
+        return runChatCompletion(userContent, apiKey, baseUrl, contextItems)
+    }
+
+    private fun runChatCompletion(
+        userContent: String,
+        apiKey: String,
+        baseUrl: String,
+        contextItems: List<QAItem>
     ): Flow<GenerateState> = flow {
         emit(GenerateState.Loading)
 
         if (apiKey.isBlank()) {
             emit(GenerateState.Error("请先在设置中填入 API Key"))
             return@flow
-        }
-
-        val userContent = if (messages.size == 1) {
-            "客户消息：${messages[0]}"
-        } else {
-            "客户连续发来的消息（按顺序）：\n" +
-                    messages.mapIndexed { i, m -> "${i + 1}. $m" }.joinToString("\n")
         }
 
         val systemPrompt = if (contextItems.isEmpty()) {
@@ -64,7 +100,6 @@ class AIRepository {
             put("model", com.xingshu.helper.AppConfig.CHAT_MODEL)
             put("max_tokens", 1024)
             put("temperature", 0.3)
-            // 强制工具调用：模型必须以 submit_reply 函数参数形式输出，schema 在 API 层强约束
             put("tool_choice", buildJsonObject {
                 put("type", "function")
                 put("function", buildJsonObject { put("name", "submit_reply") })
