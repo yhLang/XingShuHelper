@@ -27,6 +27,7 @@ import com.xingshu.helper.data.repository.VectorStore
 import com.xingshu.helper.data.repository.VisionRepository
 import com.xingshu.helper.service.CaptureCoordinator
 import com.xingshu.helper.service.ProjectionRequestActivity
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -100,6 +101,10 @@ class PanelViewModel(
 
     private val _events = MutableSharedFlow<PanelEvent>(extraBufferCapacity = 4)
     val events: SharedFlow<PanelEvent> = _events
+
+    // 用户连点"生成"或"结合 AI"会触发并发协程，互相覆盖 generateState。
+    // 每次开新生成前先取消上一个，保证只有最新一次的回调能写入状态。
+    private var generateJob: Job? = null
 
     init {
         // 监听账号切换，每次切换都重新加载对应语料库 + 常用片段
@@ -570,14 +575,16 @@ class PanelViewModel(
     /** 默认入口：直接 RAG 匹配，不调 LLM。结果页上若用户不满意可点"结合 AI"按钮再走 generateWithAi()。 */
     private fun doGenerate(messages: List<String>) {
         _state.update { it.copy(lastQuery = LastQuery.Messages(messages)) }
-        viewModelScope.launch {
+        generateJob?.cancel()
+        generateJob = viewModelScope.launch {
             doRagOnly(messages.joinToString("\n"))
         }
     }
 
     private fun doGenerateFromDialog(dialog: List<DialogMessage>) {
         _state.update { it.copy(lastQuery = LastQuery.Dialog(dialog)) }
-        viewModelScope.launch {
+        generateJob?.cancel()
+        generateJob = viewModelScope.launch {
             // 检索时只用客户那边的话，否则会把"我"的旧回复混进 RAG query 影响相似度
             val customerOnly = dialog.filter { it.role == DialogRole.CUSTOMER }
                 .joinToString("\n") { it.text }
@@ -590,7 +597,8 @@ class PanelViewModel(
         val query = _state.value.lastQuery ?: return
         // 直接复用 state.referencedQas 里的 RAG 命中，省去再次 embedding 查询
         val contextItems = _state.value.referencedQas.map { it.item }
-        viewModelScope.launch {
+        generateJob?.cancel()
+        generateJob = viewModelScope.launch {
             when (query) {
                 is LastQuery.Messages -> aiRepository.generate(
                     query.messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems

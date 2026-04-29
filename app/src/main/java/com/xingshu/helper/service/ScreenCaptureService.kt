@@ -271,7 +271,7 @@ class ScreenCaptureService : Service() {
         val rowPaddedW = w + rowPadding / pixelStride
         val raw = Bitmap.createBitmap(rowPaddedW, h, Bitmap.Config.ARGB_8888)
         raw.copyPixelsFromBuffer(buffer)
-        return if (rowPadding == 0) raw else Bitmap.createBitmap(raw, 0, 0, w, h)
+        return if (rowPadding == 0) raw else Bitmap.createBitmap(raw, 0, 0, w, h).also { raw.recycle() }
     }
 
     private fun postError(msg: String) {
