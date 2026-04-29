@@ -37,6 +37,17 @@ class ScreenCaptureService : Service() {
     private var handlerThread: HandlerThread? = null
     private var handler: Handler? = null
 
+    // VirtualDisplay + ImageReader 长驻：projection 建立后一直 mirror 屏幕，
+    // 不在每次截屏后释放 —— 否则 HyperOS / MIUI 等 ROM 会判定 projection 闲置
+    // 而自动撤销，导致下次必须重新授权
+    private var virtualDisplay: VirtualDisplay? = null
+    private var imageReader: ImageReader? = null
+
+    // 是否有"待响应的截屏请求"。listener 持续收到帧，没请求时 drain 丢弃，
+    // 有请求时取下一帧返回
+    @Volatile private var pendingCapture: Boolean = false
+    @Volatile private var skipFramesRemaining: Int = 0
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -94,63 +105,68 @@ class ScreenCaptureService : Service() {
             override fun onStop() {
                 Log.d(TAG, "MediaProjection.onStop (用户撤销或系统终止)")
                 projection = null
+                releaseDisplayAndReader()
                 CaptureCoordinator.setActiveProjection(false)
             }
         }, handler)
 
         projection = proj
         CaptureCoordinator.setActiveProjection(true)
-        Log.d(TAG, "projection established, scheduling capture in ${delayMs}ms")
 
-        handler?.postDelayed({ captureOne() }, delayMs)
+        // 一次性建立长驻的 VirtualDisplay + ImageReader，全程不释放
+        if (!setupDisplayAndReader(proj)) return
+        Log.d(TAG, "projection + display 建立完成，scheduling first capture in ${delayMs}ms")
+
+        // 安排首次截屏
+        scheduleNextCapture(delayMs, isFirstCapture = true)
     }
 
     private fun handleCaptureAgain(intent: Intent) {
         val delayMs = intent.getLongExtra(EXTRA_DELAY_MS, DEFAULT_DELAY_MS)
-        if (projection == null) {
+        if (projection == null || virtualDisplay == null || imageReader == null) {
             postError("MediaProjection 已失效，请重新授权")
             CaptureCoordinator.setActiveProjection(false)
             return
         }
-        Log.d(TAG, "reusing projection, scheduling capture in ${delayMs}ms")
-        handler?.postDelayed({ captureOne() }, delayMs)
+        Log.d(TAG, "reusing projection + display, scheduling capture in ${delayMs}ms")
+        scheduleNextCapture(delayMs, isFirstCapture = false)
     }
 
-    private fun captureOne() {
-        val proj = projection
-        val h = handler
-        if (proj == null || h == null) {
-            postError("服务状态异常，无法截屏")
-            return
-        }
-
+    /**
+     * 建立持续运行的 VirtualDisplay 和 ImageReader。listener 每帧都被触发：
+     * - pendingCapture=false：drain 丢弃帧，避免 buffer 溢出
+     * - pendingCapture=true：取一帧处理后 reset 标志位
+     */
+    private fun setupDisplayAndReader(proj: MediaProjection): Boolean {
+        val h = handler ?: return false
         val metrics = resources.displayMetrics
         val w = metrics.widthPixels
         val h2 = metrics.heightPixels
         val density = metrics.densityDpi
 
         val reader = ImageReader.newInstance(w, h2, PixelFormat.RGBA_8888, 3)
-        var virtualDisplay: VirtualDisplay? = null
-        var captured = false
-        var frameCount = 0
-
         reader.setOnImageAvailableListener({ r ->
-            if (captured) return@setOnImageAvailableListener
             val img = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-            frameCount++
-            // 跳过第一帧（VirtualDisplay 刚建立时画面可能未稳定 / 黑屏）
-            if (frameCount < 2) {
+            // 不在响应窗口内：丢弃帧（必须 close 否则 buffer 锁死）
+            if (!pendingCapture) {
                 img.close()
                 return@setOnImageAvailableListener
             }
-            captured = true
+            // 在响应窗口：先消耗"跳过"配额（VirtualDisplay 刚建/或刚收到隐藏面板事件后头一两帧可能是过渡帧）
+            if (skipFramesRemaining > 0) {
+                skipFramesRemaining--
+                img.close()
+                return@setOnImageAvailableListener
+            }
+            // 真正处理：拿这一帧、置标志位、释放等待下次
+            pendingCapture = false
             try {
                 val bitmap = imageToBitmap(img, w, h2)
                 val sig = bitmapSignature(bitmap)
                 val path = debugSaveBitmap(bitmap)
                 Log.d(
                     TAG,
-                    "captured frame#$frameCount ${bitmap.width}x${bitmap.height} " +
+                    "captured ${bitmap.width}x${bitmap.height} " +
                         "centerPixel=0x${Integer.toHexString(sig.sampleCenter)} " +
                         "allSameColor=${sig.isAllSameColor} savedTo=$path"
                 )
@@ -166,23 +182,69 @@ class ScreenCaptureService : Service() {
                 CaptureCoordinator.postError("截屏转 Bitmap 失败：${e.message}")
             } finally {
                 img.close()
-                try { virtualDisplay?.release() } catch (_: Exception) {}
-                try { reader.close() } catch (_: Exception) {}
                 CaptureCoordinator.setCapturing(false)
             }
         }, h)
 
-        try {
+        return try {
             virtualDisplay = proj.createVirtualDisplay(
                 "xingshu-capture", w, h2, density,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 reader.surface, null, h
             )
+            imageReader = reader
+            true
         } catch (e: Exception) {
             Log.e(TAG, "createVirtualDisplay failed", e)
             postError("创建虚拟显示失败：${e.message}")
             try { reader.close() } catch (_: Exception) {}
+            false
         }
+    }
+
+    /**
+     * 安排下一次截屏：等 delayMs（让面板隐藏 + 给屏幕一个稳定窗口），然后开 capture window，
+     * 跳过前 N 帧（防止过渡帧），抓下一帧返回。
+     */
+    private fun scheduleNextCapture(delayMs: Long, isFirstCapture: Boolean) {
+        handler?.postDelayed({
+            // 跳帧策略：首次截屏（VirtualDisplay 刚建立）多跳几帧；后续直接抓
+            skipFramesRemaining = if (isFirstCapture) 1 else 0
+            pendingCapture = true
+            Log.d(TAG, "capture window opened, skipFrames=$skipFramesRemaining")
+            // 兜底：如果 5 秒内屏幕完全静止没有新帧到来，强制取一次 latest
+            handler?.postDelayed({
+                if (pendingCapture) {
+                    val img = imageReader?.acquireLatestImage()
+                    if (img != null) {
+                        Log.d(TAG, "force-grabbing static frame")
+                        // 复用 listener 路径：把 pendingCapture 留 true，listener 下次会直接处理
+                        // 这里为了简单直接处理
+                        pendingCapture = false
+                        try {
+                            val w = imageReader!!.width
+                            val h = imageReader!!.height
+                            val bitmap = imageToBitmap(img, w, h)
+                            CaptureCoordinator.postSuccess(bitmap)
+                            debugSaveBitmap(bitmap)
+                        } finally {
+                            img.close()
+                            CaptureCoordinator.setCapturing(false)
+                        }
+                    } else {
+                        postError("等待截屏帧超时")
+                    }
+                }
+            }, FORCE_GRAB_TIMEOUT_MS)
+        }, delayMs)
+    }
+
+    private fun releaseDisplayAndReader() {
+        try { virtualDisplay?.release() } catch (_: Exception) {}
+        try { imageReader?.close() } catch (_: Exception) {}
+        virtualDisplay = null
+        imageReader = null
+        pendingCapture = false
     }
 
     private fun debugSaveBitmap(bitmap: Bitmap): String? {
@@ -238,6 +300,7 @@ class ScreenCaptureService : Service() {
     }
 
     private fun cleanupProjection() {
+        releaseDisplayAndReader()
         try { projection?.stop() } catch (_: Exception) {}
         projection = null
         CaptureCoordinator.setActiveProjection(false)
@@ -274,6 +337,7 @@ class ScreenCaptureService : Service() {
         private const val CHANNEL_ID = "xingshu_capture"
         private const val NOTIFICATION_ID = 2
         private const val DEFAULT_DELAY_MS = 5_000L
+        private const val FORCE_GRAB_TIMEOUT_MS = 1_500L
 
         const val ACTION_START_AND_CAPTURE = "com.xingshu.helper.START_AND_CAPTURE"
         const val ACTION_CAPTURE_AGAIN = "com.xingshu.helper.CAPTURE_AGAIN"
