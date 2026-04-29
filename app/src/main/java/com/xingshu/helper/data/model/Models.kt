@@ -16,16 +16,25 @@ data class QAItem(
     val riskNote: String = ""
 )
 
+enum class GenerateMode { RAG_ONLY, RAG_PLUS_AI }
+
+data class RagMatch(
+    val scene: String,
+    val answer: String,
+    val score: Float
+)
+
 data class GeneratedResult(
     val isSensitive: Boolean = false,
     val sensitiveNote: String = "",
-    val shortVersion: String,
-    val naturalVersion: String,
-    val inviteVersion: String,
-    val intent: String,
-    val nextStep: String,
-    val humanConfirm: String,
-    val isDirectMatch: Boolean = false
+    val shortVersion: String = "",
+    val naturalVersion: String = "",
+    val inviteVersion: String = "",
+    val intent: String = "",
+    val nextStep: String = "",
+    val humanConfirm: String = "",
+    val isDirectMatch: Boolean = false,
+    val ragMatches: List<RagMatch> = emptyList()
 )
 
 sealed class GenerateState {

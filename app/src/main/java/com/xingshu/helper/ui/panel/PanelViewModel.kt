@@ -11,8 +11,12 @@ import com.xingshu.helper.data.account.BusinessAccount
 import com.xingshu.helper.data.model.BasketMessage
 import com.xingshu.helper.data.model.DialogMessage
 import com.xingshu.helper.data.model.DialogRole
+import com.xingshu.helper.data.model.GeneratedResult
+import com.xingshu.helper.data.model.GenerateMode
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
+import com.xingshu.helper.data.model.QAItem
+import com.xingshu.helper.data.model.RagMatch
 import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
 import com.xingshu.helper.data.repository.EmbeddingRepository
@@ -39,6 +43,7 @@ data class PanelUiState(
     val visionState: VisionState = VisionState.Idle,
     val account: BusinessAccount = BusinessAccount.KIRIN,
     val corpusReady: Boolean = false,
+    val generateMode: GenerateMode = GenerateMode.RAG_PLUS_AI,
 )
 
 enum class ClipboardStatus { EMPTY, OK, DUPLICATE, TOO_LONG }
@@ -158,6 +163,10 @@ class PanelViewModel(
         }
     }
 
+    fun setGenerateMode(mode: GenerateMode) {
+        _state.update { it.copy(generateMode = mode) }
+    }
+
     fun switchAccount(account: BusinessAccount) {
         if (account == accountManager.current.value) return
         accountManager.set(account)
@@ -258,7 +267,12 @@ class PanelViewModel(
 
     private fun doGenerate(messages: List<String>) {
         viewModelScope.launch {
-            val contextItems = retrieveContext(messages.joinToString("\n"))
+            val query = messages.joinToString("\n")
+            if (_state.value.generateMode == GenerateMode.RAG_ONLY) {
+                doRagOnly(query)
+                return@launch
+            }
+            val contextItems = retrieveContext(query)
             aiRepository.generate(messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems)
                 .collect { collectGenerateState(it) }
         }
@@ -269,6 +283,10 @@ class PanelViewModel(
             // 检索时只用客户那边的话，否则会把"我"的旧回复混进 RAG query 影响相似度
             val customerOnly = dialog.filter { it.role == DialogRole.CUSTOMER }
                 .joinToString("\n") { it.text }
+            if (_state.value.generateMode == GenerateMode.RAG_ONLY) {
+                doRagOnly(customerOnly)
+                return@launch
+            }
             val contextItems = retrieveContext(customerOnly)
             aiRepository.generateFromDialog(
                 dialog, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
@@ -276,11 +294,28 @@ class PanelViewModel(
         }
     }
 
-    private suspend fun retrieveContext(query: String): List<com.xingshu.helper.data.model.QAItem> {
+    private suspend fun doRagOnly(query: String) {
+        _state.update { it.copy(generateState = GenerateState.Loading) }
+        val matches = retrieveContextWithScores(query)
+        if (matches.isEmpty()) {
+            collectGenerateState(GenerateState.Error("未找到匹配的历史回答，请检查语料库是否加载"))
+            return
+        }
+        val ragMatches = matches.map { (item, score) ->
+            RagMatch(scene = item.scene, answer = item.answer, score = score)
+        }
+        collectGenerateState(GenerateState.Success(GeneratedResult(isDirectMatch = true, ragMatches = ragMatches)))
+    }
+
+    private suspend fun retrieveContextWithScores(query: String): List<Pair<QAItem, Float>> {
         if (!vectorStore.isReady || query.isBlank()) return emptyList()
         val queryVec = embeddingRepository.embed(query, AppConfig.API_KEY, AppConfig.API_BASE_URL)
             ?: return emptyList()
-        return vectorStore.search(queryVec, topK = 5).map { (item, _) -> item }
+        return vectorStore.search(queryVec, topK = 5)
+    }
+
+    private suspend fun retrieveContext(query: String): List<QAItem> {
+        return retrieveContextWithScores(query).map { (item, _) -> item }
     }
 
     private fun collectGenerateState(state: GenerateState) {
