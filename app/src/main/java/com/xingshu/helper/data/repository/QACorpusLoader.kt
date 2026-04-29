@@ -11,12 +11,27 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class QACorpusLoader(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true }
+    private val sync = CorpusSyncManager(context)
+
+    /** 优先用 filesDir 里的同步版（CorpusSyncManager 写入），其次回退到 APK assets。 */
+    private fun openTexts(account: BusinessAccount): InputStream {
+        val local = sync.localTextsFile(account)
+        return if (local.exists() && local.length() > 0) local.inputStream()
+        else context.assets.open("qa_${account.key}_texts.json")
+    }
+
+    private fun openEmbeddings(account: BusinessAccount): InputStream {
+        val local = sync.localEmbeddingsFile(account)
+        return if (local.exists() && local.length() > 0) local.inputStream()
+        else context.assets.open("qa_${account.key}_embeddings.bin")
+    }
 
     suspend fun load(account: BusinessAccount): List<Pair<QAItem, FloatArray>> = withContext(Dispatchers.IO) {
         val items = loadTexts(account)
@@ -53,8 +68,7 @@ class QACorpusLoader(private val context: Context) {
     }
 
     private fun loadTexts(account: BusinessAccount): List<QAItem> {
-        val raw = context.assets.open("qa_${account.key}_texts.json")
-            .bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val raw = openTexts(account).bufferedReader(Charsets.UTF_8).use { it.readText() }
         val arr = json.parseToJsonElement(raw) as JsonArray
         return arr.map { elem ->
             val obj = elem as JsonObject
@@ -69,7 +83,7 @@ class QACorpusLoader(private val context: Context) {
     }
 
     private fun loadEmbeddings(account: BusinessAccount): List<FloatArray> {
-        val bytes = context.assets.open("qa_${account.key}_embeddings.bin").use { it.readBytes() }
+        val bytes = openEmbeddings(account).use { it.readBytes() }
         val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
         val n = buf.int
         val d = buf.int

@@ -14,6 +14,9 @@ val localProps = Properties().apply {
 val dashscopeApiKey: String = localProps.getProperty("DASHSCOPE_API_KEY", "")
 val githubOwner: String = localProps.getProperty("GITHUB_OWNER", "")
 val githubRepo: String = localProps.getProperty("GITHUB_REPO", "")
+// 金标语料库独立仓库（可与 APK 仓库不同），格式 "owner/repo"，分支默认 main
+val corpusRepo: String = localProps.getProperty("CORPUS_REPO", "")
+val corpusBranch: String = localProps.getProperty("CORPUS_BRANCH", "main")
 
 // 版本号：默认值；CI 通过 -PversionName / -PversionCode 注入实际值
 val ciVersionName: String = (project.findProperty("versionName") as String?) ?: "1.0.0"
@@ -34,6 +37,8 @@ android {
         buildConfigField("String", "DASHSCOPE_API_KEY", "\"$dashscopeApiKey\"")
         buildConfigField("String", "GITHUB_OWNER", "\"$githubOwner\"")
         buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
+        buildConfigField("String", "CORPUS_REPO", "\"$corpusRepo\"")
+        buildConfigField("String", "CORPUS_BRANCH", "\"$corpusBranch\"")
     }
 
     signingConfigs {

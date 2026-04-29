@@ -29,24 +29,9 @@ object UpdateChecker {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .callTimeout(0, TimeUnit.SECONDS) // 不限制总时长，APK 体积较大
-        .build()
+    private val client = GitHubMirrors.client
 
-    /**
-     * GitHub Releases 在国内直连基本拉不动（github.com 限速 + objects.githubusercontent.com 经常被墙）。
-     * 走第三方反代镜像把同一个 URL 拉下来，无需翻墙。
-     * 有的镜像会随时挂掉，所以多备几个，按顺序尝试。
-     */
-    private val downloadMirrors: List<(String) -> String> = listOf(
-        { url -> "https://ghfast.top/$url" },
-        { url -> "https://gh-proxy.com/$url" },
-        { url -> "https://mirror.ghproxy.com/$url" },
-        { url -> "https://ghps.cc/$url" },
-        { url -> url }, // 兜底直连，最后一个尝试
-    )
+    private val downloadMirrors = GitHubMirrors.wrappers
 
     sealed class State {
         object Idle : State()

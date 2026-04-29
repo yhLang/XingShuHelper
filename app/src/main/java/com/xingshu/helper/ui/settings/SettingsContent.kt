@@ -10,12 +10,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xingshu.helper.data.account.BusinessAccount
+import com.xingshu.helper.data.repository.CorpusSyncManager
 
 @Composable
 fun SettingsContent(
     currentAccount: BusinessAccount,
     corpusReady: Boolean,
+    corpusVersion: Int,
+    corpusSync: CorpusSyncManager.State,
+    corpusSyncConfigured: Boolean,
     onSwitchAccount: (BusinessAccount) -> Unit,
+    onSyncCorpus: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -46,6 +51,16 @@ fun SettingsContent(
             color = if (corpusReady) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        if (corpusSyncConfigured) {
+            HorizontalDivider()
+            SectionTitle("金标知识库")
+            CorpusSyncRow(
+                version = corpusVersion,
+                state = corpusSync,
+                onCheck = onSyncCorpus,
+            )
+        }
 
         HorizontalDivider()
 
@@ -109,4 +124,33 @@ private fun AccountRow(
 @Composable
 private fun SectionTitle(title: String) {
     Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+}
+
+@Composable
+private fun CorpusSyncRow(
+    version: Int,
+    state: CorpusSyncManager.State,
+    onCheck: () -> Unit,
+) {
+    val (statusText, statusColor) = when (state) {
+        CorpusSyncManager.State.Idle ->
+            (if (version > 0) "本地版本 v$version" else "尚未同步，使用 APK 内置语料") to
+                MaterialTheme.colorScheme.onSurfaceVariant
+        CorpusSyncManager.State.Checking -> "正在检查更新…" to MaterialTheme.colorScheme.primary
+        is CorpusSyncManager.State.UpToDate -> "已是最新（v${state.version}）" to MaterialTheme.colorScheme.primary
+        is CorpusSyncManager.State.Downloading ->
+            "下载中 ${(state.progress * 100).toInt()}%" to MaterialTheme.colorScheme.primary
+        is CorpusSyncManager.State.Updated ->
+            "已更新到 v${state.version}（${state.count} 条）" to MaterialTheme.colorScheme.primary
+        is CorpusSyncManager.State.Error -> "失败：${state.message}" to MaterialTheme.colorScheme.error
+    }
+    val busy = state is CorpusSyncManager.State.Checking || state is CorpusSyncManager.State.Downloading
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(statusText, fontSize = 12.sp, color = statusColor)
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Button(onClick = onCheck, enabled = !busy) {
+                Text(if (busy) "请稍候" else "检查金标更新")
+            }
+        }
+    }
 }

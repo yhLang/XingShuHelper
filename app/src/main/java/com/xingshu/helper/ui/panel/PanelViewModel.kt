@@ -19,6 +19,7 @@ import com.xingshu.helper.data.model.RagMatch
 import com.xingshu.helper.data.model.Snippet
 import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
+import com.xingshu.helper.data.repository.CorpusSyncManager
 import com.xingshu.helper.data.repository.EmbeddingRepository
 import com.xingshu.helper.data.repository.LocalGoldStore
 import com.xingshu.helper.data.repository.QACorpusLoader
@@ -54,6 +55,10 @@ data class PanelUiState(
     val lastQuery: LastQuery? = null,
     /** 添加金标 QA 流程的状态。 */
     val addGold: AddGoldState = AddGoldState(),
+    /** 金标语料云同步状态。 */
+    val corpusSync: CorpusSyncManager.State = CorpusSyncManager.State.Idle,
+    /** 当前账号本地已同步的金标版本号；0 表示尚未同步过（用 APK assets 兜底）。 */
+    val corpusVersion: Int = 0,
 )
 
 /** 添加金标 QA 表单状态。 */
@@ -194,11 +199,26 @@ class PanelViewModel(
         try {
             val corpus = QACorpusLoader(appContext).load(account)
             vectorStore.initialize(corpus)
-            _state.update { it.copy(corpusReady = true) }
-            android.util.Log.d("PanelViewModel", "RAG 语料库加载完成 [${account.key}]: ${corpus.size} 条")
+            val version = CorpusSyncManager(appContext).localVersion(account)
+            _state.update { it.copy(corpusReady = true, corpusVersion = version) }
+            android.util.Log.d("PanelViewModel", "RAG 语料库加载完成 [${account.key}]: ${corpus.size} 条，本地金标版本 $version")
         } catch (e: Exception) {
             _state.update { it.copy(corpusReady = false) }
             android.util.Log.e("PanelViewModel", "RAG 语料库加载失败 [${account.key}]: ${e.message}")
+        }
+    }
+
+    /** 用户在设置页点击"检查金标更新"时调用。同步成功后自动重新加载语料库。 */
+    fun syncCorpus() {
+        val account = _state.value.account
+        viewModelScope.launch {
+            val mgr = CorpusSyncManager(appContext)
+            val ok = mgr.sync(account) { s ->
+                _state.update { it.copy(corpusSync = s) }
+            }
+            if (ok && _state.value.corpusSync is CorpusSyncManager.State.Updated) {
+                loadCorpus(account)
+            }
         }
     }
 
