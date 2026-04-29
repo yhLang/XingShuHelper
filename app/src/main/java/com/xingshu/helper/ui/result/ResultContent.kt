@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.xingshu.helper.data.model.GeneratedResult
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
+import com.xingshu.helper.data.model.QAItem
 import com.xingshu.helper.data.model.RagMatch
 import com.xingshu.helper.ui.panel.PanelUiState
 import com.xingshu.helper.ui.panel.PanelViewModel
@@ -84,13 +86,21 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                     }
                     result.ragMatches.forEachIndexed { index, match ->
                         item {
+                            // referencedQas 顺序与 ragMatches 一致：第 i 条 QAItem 即是 ragMatches[i] 的来源
+                            val sourceItem = state.referencedQas.getOrNull(index)?.item
                             RagMatchCard(
                                 rank = index + 1,
                                 match = match,
+                                sourceItem = sourceItem,
                                 copied = copiedLabel == "rag_$index",
                                 onCopy = {
                                     copyText(context, match.answer)
                                     copiedLabel = "rag_$index"
+                                },
+                                onSave = { newAnswer, newRiskNote ->
+                                    if (sourceItem != null) {
+                                        viewModel.updateRagAnswer(sourceItem, newAnswer, newRiskNote)
+                                    }
                                 }
                             )
                         }
@@ -288,7 +298,16 @@ private fun MetaRow(label: String, value: String, isWarning: Boolean = false) {
 }
 
 @Composable
-private fun RagMatchCard(rank: Int, match: RagMatch, copied: Boolean, onCopy: () -> Unit) {
+private fun RagMatchCard(
+    rank: Int,
+    match: RagMatch,
+    sourceItem: QAItem?,
+    copied: Boolean,
+    onCopy: () -> Unit,
+    onSave: (newAnswer: String, newRiskNote: String) -> Unit,
+) {
+    var editing by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -324,23 +343,107 @@ private fun RagMatchCard(rank: Int, match: RagMatch, copied: Boolean, onCopy: ()
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (sourceItem?.isLocal == true) {
+                    Text(
+                        "本地",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
             }
-            FilledTonalButton(
-                onClick = onCopy,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                modifier = Modifier.height(30.dp)
-            ) {
-                if (copied) {
-                    Text("已复制 ✓", fontSize = 12.sp)
-                } else {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("复制", fontSize = 12.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (sourceItem != null) {
+                    IconButton(onClick = { editing = true }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(16.dp))
+                    }
+                }
+                FilledTonalButton(
+                    onClick = onCopy,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    if (copied) {
+                        Text("已复制 ✓", fontSize = 12.sp)
+                    } else {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("复制", fontSize = 12.sp)
+                    }
                 }
             }
         }
         Text(match.answer, fontSize = 14.sp, lineHeight = 22.sp)
     }
+
+    if (editing && sourceItem != null) {
+        EditAnswerDialog(
+            scene = sourceItem.scene,
+            question = sourceItem.questions.firstOrNull().orEmpty(),
+            initialAnswer = sourceItem.answer,
+            initialRiskNote = sourceItem.riskNote,
+            onDismiss = { editing = false },
+            onSave = { newAnswer, newRiskNote ->
+                onSave(newAnswer, newRiskNote)
+                editing = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun EditAnswerDialog(
+    scene: String,
+    question: String,
+    initialAnswer: String,
+    initialRiskNote: String,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+) {
+    var answer by remember { mutableStateOf(initialAnswer) }
+    var riskNote by remember { mutableStateOf(initialRiskNote) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("修订回复", fontSize = 15.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "[$scene] $question",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = answer,
+                    onValueChange = { answer = it },
+                    label = { Text("回复内容 *", fontSize = 12.sp) },
+                    minLines = 3,
+                    maxLines = 8,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = riskNote,
+                    onValueChange = { riskNote = it },
+                    label = { Text("风险提示（可选）", fontSize = 12.sp) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "保存后会以本地金标形式入库（assets 原版保留），下次同问句优先返回修订版。",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(answer, riskNote) },
+                enabled = answer.isNotBlank()
+            ) { Text("保存", fontSize = 13.sp) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消", fontSize = 13.sp) }
+        }
+    )
 }
 
 private fun copyText(context: Context, text: String) {

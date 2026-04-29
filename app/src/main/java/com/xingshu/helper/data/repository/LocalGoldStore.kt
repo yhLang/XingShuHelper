@@ -49,6 +49,7 @@ class LocalGoldStore(private val context: Context) {
                         answer = obj["answer"]?.jsonPrimitive?.content ?: "",
                         riskNote = obj["risk_note"]?.jsonPrimitive?.content ?: "",
                         isGold = true,
+                        isLocal = true,
                     )
                     val vec = (obj["embedding"] as JsonArray).map { it.jsonPrimitive.float }.toFloatArray()
                     item to vec
@@ -79,5 +80,52 @@ class LocalGoldStore(private val context: Context) {
     suspend fun count(account: BusinessAccount): Int = withContext(Dispatchers.IO) {
         val f = file(account)
         if (!f.exists()) 0 else f.useLines { it.count { line -> line.isNotBlank() } }
+    }
+
+    /**
+     * 按 question 替换或追加。用于用户编辑某条 QA 的 answer：
+     * - 如果本地已有同 question 的条目（之前修订过），直接覆盖
+     * - 如果没有（首次修订 assets 来源的条目），追加新条目
+     *
+     * 注：assets 来源的原条目不动（不可写），但本地修订版有金标 boost 会优先返回。
+     */
+    suspend fun upsert(
+        account: BusinessAccount,
+        question: String,
+        scene: String,
+        answer: String,
+        riskNote: String,
+        embedding: FloatArray,
+    ) = withContext(Dispatchers.IO) {
+        val f = file(account)
+        val targetQ = question.trim()
+        if (targetQ.isEmpty()) return@withContext
+
+        // 读现有所有行，过滤掉同 question 的（去重）
+        val keep: List<String> = if (f.exists()) {
+            f.useLines { lines ->
+                lines.mapNotNull { line ->
+                    val trimmed = line.trim()
+                    if (trimmed.isEmpty()) return@mapNotNull null
+                    val q = runCatching {
+                        ((json.parseToJsonElement(trimmed) as? JsonObject)
+                            ?.get("question") as? JsonPrimitive)?.content
+                    }.getOrNull()
+                    if (q == targetQ) null else trimmed
+                }.toList()
+            }
+        } else emptyList()
+
+        val newLine = buildJsonObject {
+            put("scene", scene)
+            put("question", targetQ)
+            put("answer", answer)
+            put("risk_note", riskNote)
+            putJsonArray("embedding") {
+                embedding.forEach { add(JsonPrimitive(it)) }
+            }
+        }.toString()
+
+        f.writeText((keep + newLine).joinToString("\n", postfix = "\n"))
     }
 }

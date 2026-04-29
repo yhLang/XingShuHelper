@@ -20,6 +20,27 @@ class VectorStore {
         entries = entries + more
     }
 
+    /**
+     * 按 question 替换 isLocal 条目，或追加新的 isLocal 条目。
+     * assets 来源（isLocal=false）保留不动；本地修订版会替换同 question 的旧本地版或新增。
+     */
+    fun upsertByQuestion(question: String, newItem: QAItem, newVec: FloatArray) {
+        val updated = entries.toMutableList()
+        val existing = updated.indexOfFirst { (item, _) ->
+            item.isLocal && item.questions.firstOrNull() == question
+        }
+        if (existing >= 0) {
+            updated[existing] = newItem to newVec
+        } else {
+            updated.add(newItem to newVec)
+        }
+        entries = updated
+    }
+
+    /** 找回 question 对应的向量（编辑 answer 时复用原向量，不需重新调 embedding API）。 */
+    fun vectorForQuestion(question: String): FloatArray? =
+        entries.firstOrNull { (item, _) -> item.questions.firstOrNull() == question }?.second
+
     fun search(query: FloatArray, topK: Int = 5): List<Pair<QAItem, Float>> {
         val snapshot = entries
         if (snapshot.isEmpty()) return emptyList()

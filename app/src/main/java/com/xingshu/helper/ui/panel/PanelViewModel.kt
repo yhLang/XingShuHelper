@@ -312,6 +312,65 @@ class PanelViewModel(
         }
     }
 
+    /**
+     * 用户在 RAG 结果页编辑某条 QA 的 A，写入本地金标库并立即生效。
+     * 复用原向量（question 没变），不调 embedding API。
+     */
+    fun updateRagAnswer(originalItem: QAItem, newAnswer: String, newRiskNote: String = originalItem.riskNote) {
+        val account = _state.value.account
+        val question = originalItem.questions.firstOrNull().orEmpty()
+        val cleanAnswer = newAnswer.trim()
+        if (question.isBlank() || cleanAnswer.isBlank()) {
+            showSnackbar("question 或 answer 不能为空")
+            return
+        }
+        val vec = vectorStore.vectorForQuestion(question)
+        if (vec == null) {
+            showSnackbar("找不到原向量，无法保存")
+            return
+        }
+        val updated = originalItem.copy(
+            answer = cleanAnswer,
+            riskNote = newRiskNote,
+            isGold = true,    // 修订即视为金标
+            isLocal = true,
+        )
+        viewModelScope.launch {
+            LocalGoldStore(appContext).upsert(
+                account = account,
+                question = question,
+                scene = updated.scene,
+                answer = updated.answer,
+                riskNote = updated.riskNote,
+                embedding = vec,
+            )
+            vectorStore.upsertByQuestion(question, updated, vec)
+            // 同步更新当前 referencedQas 中匹配的那条，UI 立刻看到新 A
+            _state.update { st ->
+                st.copy(
+                    referencedQas = st.referencedQas.map { ref ->
+                        if (ref.item.questions.firstOrNull() == question) ref.copy(item = updated) else ref
+                    },
+                    snackbar = "已保存修订（立即生效）",
+                )
+            }
+            // 如果当前结果页用的是 GeneratedResult.ragMatches（RAG-only 模式），
+            // 也把对应 RagMatch 的 answer 替换掉，UI 立刻看到新版本
+            val cur = _state.value.generateState
+            if (cur is GenerateState.Success && cur.result.isDirectMatch) {
+                val updatedMatches = cur.result.ragMatches.map { rm ->
+                    // RagMatch 没有 question 字段——用 scene+answer 匹配旧值（足够区分 top-K）
+                    if (rm.scene == originalItem.scene && rm.answer == originalItem.answer) {
+                        rm.copy(answer = updated.answer)
+                    } else rm
+                }
+                _state.update { st ->
+                    st.copy(generateState = GenerateState.Success(cur.result.copy(ragMatches = updatedMatches)))
+                }
+            }
+        }
+    }
+
     fun switchAccount(account: BusinessAccount) {
         if (account == accountManager.current.value) return
         accountManager.set(account)
