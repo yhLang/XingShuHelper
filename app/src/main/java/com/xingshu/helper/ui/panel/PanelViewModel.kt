@@ -402,6 +402,21 @@ class PanelViewModel(
                     snackbar = "已保存修订（立即生效）",
                 )
             }
+            // 同步上传到云端（FC 按 question 替换；网络失败仅 snackbar 提示，不阻塞）
+            if (GoldUploader.isConfigured()) {
+                val r = GoldUploader.upload(
+                    account = account,
+                    scene = updated.scene,
+                    questions = listOf(question),
+                    answer = updated.answer,
+                    riskNote = updated.riskNote,
+                )
+                val msg = when (r) {
+                    is GoldUploader.Result.Success -> "已保存修订（立即生效），已同步到云端"
+                    is GoldUploader.Result.Failure -> "已保存修订（立即生效），云端同步失败：${r.message}"
+                }
+                _state.update { it.copy(snackbar = msg) }
+            }
             // 如果当前结果页用的是 GeneratedResult.ragMatches（RAG-only 模式），
             // 也把对应 RagMatch 的 answer 替换掉，UI 立刻看到新版本
             val cur = _state.value.generateState
