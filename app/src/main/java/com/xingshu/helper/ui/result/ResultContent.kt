@@ -147,6 +147,18 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                     item { ReferenceSources(items = state.referencedQas) }
                 }
 
+                // RAG-only 结果不满意时，可以基于这批检索结果再调 LLM 生成三版回复
+                if (result.isDirectMatch) {
+                    item {
+                        Button(
+                            onClick = { viewModel.generateWithAi() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("结果不满意？结合 AI 生成", fontSize = 14.sp)
+                        }
+                    }
+                }
+
                 item {
                     OutlinedButton(
                         onClick = { viewModel.navigateTo(PanelScreen.MAIN) },

@@ -18,8 +18,6 @@ data class QAItem(
     val isGold: Boolean = false,
 )
 
-enum class GenerateMode { RAG_ONLY, RAG_PLUS_AI }
-
 data class RagMatch(
     val scene: String,
     val answer: String,

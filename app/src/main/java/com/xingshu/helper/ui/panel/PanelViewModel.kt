@@ -12,7 +12,6 @@ import com.xingshu.helper.data.model.BasketMessage
 import com.xingshu.helper.data.model.DialogMessage
 import com.xingshu.helper.data.model.DialogRole
 import com.xingshu.helper.data.model.GeneratedResult
-import com.xingshu.helper.data.model.GenerateMode
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.data.model.QAItem
@@ -47,10 +46,17 @@ data class PanelUiState(
     val corpusReady: Boolean = false,
     /** 上一次生成时检索到的参考话术（按相似度降序），用于结果页"参考来源"展示。 */
     val referencedQas: List<ReferencedQa> = emptyList(),
-    val generateMode: GenerateMode = GenerateMode.RAG_PLUS_AI,
     /** 当前账号的常用片段（不走 RAG，静态加载）。 */
     val snippets: List<Snippet> = emptyList(),
+    /** 上一次生成请求的输入，用于结果页"结合 AI 重跑"按钮。 */
+    val lastQuery: LastQuery? = null,
 )
+
+/** 暂存最近一次生成的输入，便于用户在结果页选择"结合 AI 重跑"。 */
+sealed class LastQuery {
+    data class Messages(val messages: List<String>) : LastQuery()
+    data class Dialog(val dialog: List<DialogMessage>) : LastQuery()
+}
 
 /** 一条 RAG 检索结果，带相似度分数（0-1，越大越相似）。 */
 data class ReferencedQa(val item: QAItem, val score: Float)
@@ -179,10 +185,6 @@ class PanelViewModel(
         android.util.Log.d("PanelViewModel", "常用片段加载完成 [${account.key}]: ${list.size} 条")
     }
 
-    fun setGenerateMode(mode: GenerateMode) {
-        _state.update { it.copy(generateMode = mode) }
-    }
-
     fun switchAccount(account: BusinessAccount) {
         if (account == accountManager.current.value) return
         accountManager.set(account)
@@ -281,32 +283,38 @@ class PanelViewModel(
         doGenerate(messages)
     }
 
+    /** 默认入口：直接 RAG 匹配，不调 LLM。结果页上若用户不满意可点"结合 AI"按钮再走 generateWithAi()。 */
     private fun doGenerate(messages: List<String>) {
+        _state.update { it.copy(lastQuery = LastQuery.Messages(messages)) }
         viewModelScope.launch {
-            val query = messages.joinToString("\n")
-            if (_state.value.generateMode == GenerateMode.RAG_ONLY) {
-                doRagOnly(query)
-                return@launch
-            }
-            val contextItems = retrieveContext(query)
-            aiRepository.generate(messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems)
-                .collect { collectGenerateState(it) }
+            doRagOnly(messages.joinToString("\n"))
         }
     }
 
     private fun doGenerateFromDialog(dialog: List<DialogMessage>) {
+        _state.update { it.copy(lastQuery = LastQuery.Dialog(dialog)) }
         viewModelScope.launch {
             // 检索时只用客户那边的话，否则会把"我"的旧回复混进 RAG query 影响相似度
             val customerOnly = dialog.filter { it.role == DialogRole.CUSTOMER }
                 .joinToString("\n") { it.text }
-            if (_state.value.generateMode == GenerateMode.RAG_ONLY) {
-                doRagOnly(customerOnly)
-                return@launch
+            doRagOnly(customerOnly)
+        }
+    }
+
+    /** 结果页"结合 AI"按钮触发：复用刚才已检索好的 RAG 上下文（不再调 embedding API），调 LLM 生成三版回复。 */
+    fun generateWithAi() {
+        val query = _state.value.lastQuery ?: return
+        // 直接复用 state.referencedQas 里的 RAG 命中，省去再次 embedding 查询
+        val contextItems = _state.value.referencedQas.map { it.item }
+        viewModelScope.launch {
+            when (query) {
+                is LastQuery.Messages -> aiRepository.generate(
+                    query.messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
+                ).collect { collectGenerateState(it) }
+                is LastQuery.Dialog -> aiRepository.generateFromDialog(
+                    query.dialog, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
+                ).collect { collectGenerateState(it) }
             }
-            val contextItems = retrieveContext(customerOnly)
-            aiRepository.generateFromDialog(
-                dialog, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
-            ).collect { collectGenerateState(it) }
         }
     }
 
