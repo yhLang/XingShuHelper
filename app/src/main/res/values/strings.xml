@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">行恕客服助手</string>
+    <string name="notification_channel_id">xingshu_overlay</string>
+    <string name="notification_channel_name">悬浮助手</string>
+    <string name="notification_title">行恕客服助手运行中</string>
+    <string name="notification_text">点击可返回设置</string>
+</resources>

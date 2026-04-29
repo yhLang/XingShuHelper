@@ -1,0 +1,249 @@
+package com.xingshu.helper.ui.result
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.xingshu.helper.data.model.GeneratedResult
+import com.xingshu.helper.data.model.GenerateState
+import com.xingshu.helper.data.model.PanelScreen
+import com.xingshu.helper.ui.panel.PanelUiState
+import com.xingshu.helper.ui.panel.PanelViewModel
+
+@Composable
+fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
+    val context = LocalContext.current
+    var copiedLabel by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(copiedLabel) {
+        if (copiedLabel != null) {
+            delay(1500)
+            copiedLabel = null
+        }
+    }
+
+    when (val genState = state.generateState) {
+        is GenerateState.Loading -> {
+            Box(modifier = Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator()
+                    Text("正在生成回复…", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
+        is GenerateState.Error -> {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(genState.message, color = MaterialTheme.colorScheme.error, fontSize = 14.sp)
+                Button(onClick = { viewModel.navigateTo(PanelScreen.MAIN) }) {
+                    Text("返回重试")
+                }
+            }
+        }
+
+        is GenerateState.Success -> {
+            val result = genState.result
+
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (result.isSensitive) {
+                    item { SensitiveWarning(note = result.sensitiveNote) }
+                }
+
+                item {
+                    ReplyCard(
+                        label = "简短版",
+                        labelColor = MaterialTheme.colorScheme.primary,
+                        content = result.shortVersion,
+                        copied = copiedLabel == "short",
+                        onCopy = {
+                            copyText(context, result.shortVersion)
+                            copiedLabel = "short"
+                        }
+                    )
+                }
+
+                item {
+                    ReplyCard(
+                        label = "自然版",
+                        labelColor = MaterialTheme.colorScheme.secondary,
+                        content = result.naturalVersion,
+                        copied = copiedLabel == "natural",
+                        onCopy = {
+                            copyText(context, result.naturalVersion)
+                            copiedLabel = "natural"
+                        }
+                    )
+                }
+
+                item {
+                    ReplyCard(
+                        label = "邀约版",
+                        labelColor = MaterialTheme.colorScheme.tertiary,
+                        content = result.inviteVersion,
+                        copied = copiedLabel == "invite",
+                        onCopy = {
+                            copyText(context, result.inviteVersion)
+                            copiedLabel = "invite"
+                        }
+                    )
+                }
+
+                item { MetaInfo(result = result) }
+
+                item {
+                    OutlinedButton(
+                        onClick = { viewModel.navigateTo(PanelScreen.MAIN) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("返回继续")
+                    }
+                }
+            }
+        }
+
+        else -> {}
+    }
+}
+
+@Composable
+private fun SensitiveWarning(note: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Icon(
+            Icons.Default.Warning,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(18.dp).padding(top = 2.dp)
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "敏感问题 — 建议人工确认后再发送",
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 13.sp
+            )
+            if (note.isNotBlank()) {
+                Text(note, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReplyCard(
+    label: String,
+    labelColor: androidx.compose.ui.graphics.Color,
+    content: String,
+    copied: Boolean,
+    onCopy: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, fontWeight = FontWeight.SemiBold, color = labelColor, fontSize = 13.sp)
+            FilledTonalButton(
+                onClick = onCopy,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.height(30.dp)
+            ) {
+                if (copied) {
+                    Text("已复制 ✓", fontSize = 12.sp)
+                } else {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("复制", fontSize = 12.sp)
+                }
+            }
+        }
+        Text(content, fontSize = 14.sp, lineHeight = 22.sp)
+    }
+}
+
+@Composable
+private fun MetaInfo(result: GeneratedResult) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        if (result.intent.isNotBlank()) {
+            MetaRow(label = "客户意向", value = result.intent)
+        }
+        if (result.nextStep.isNotBlank()) {
+            MetaRow(label = "下一步", value = result.nextStep)
+        }
+        if (result.humanConfirm.isNotBlank()) {
+            MetaRow(label = "人工确认", value = result.humanConfirm, isWarning = true)
+        }
+    }
+}
+
+@Composable
+private fun MetaRow(label: String, value: String, isWarning: Boolean = false) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            label,
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.widthIn(min = 56.dp)
+        )
+        Text(
+            value,
+            fontSize = 12.sp,
+            color = if (isWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+private fun copyText(context: Context, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("reply", text))
+}
