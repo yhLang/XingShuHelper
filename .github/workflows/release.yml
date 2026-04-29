@@ -51,11 +51,16 @@ jobs:
       - name: Write local.properties
         env:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          CORPUS_UPLOAD_SECRET: ${{ secrets.CORPUS_UPLOAD_SECRET }}
         run: |
           cat > local.properties <<EOF
           DASHSCOPE_API_KEY=$DASHSCOPE_API_KEY
           GITHUB_OWNER=${{ github.repository_owner }}
           GITHUB_REPO=${{ github.event.repository.name }}
+          CORPUS_REPO=yhLang/XingShuHelper-Corpus
+          CORPUS_BRANCH=main
+          CORPUS_UPLOAD_URL=https://xingshuuploader-qkullsprlf.cn-hangzhou.fcapp.run/
+          CORPUS_UPLOAD_SECRET=$CORPUS_UPLOAD_SECRET
           EOF
 
       - name: Grant gradlew exec
