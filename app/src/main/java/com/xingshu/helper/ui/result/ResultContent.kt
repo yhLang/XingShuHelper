@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import com.xingshu.helper.data.model.GeneratedResult
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
+import com.xingshu.helper.data.model.RagMatch
 import com.xingshu.helper.ui.panel.PanelUiState
 import com.xingshu.helper.ui.panel.PanelViewModel
 import com.xingshu.helper.ui.panel.ReferencedQa
@@ -71,50 +72,76 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (result.isSensitive) {
-                    item { SensitiveWarning(note = result.sensitiveNote) }
-                }
-
-                item {
-                    ReplyCard(
-                        label = "简短版",
-                        labelColor = MaterialTheme.colorScheme.primary,
-                        content = result.shortVersion,
-                        copied = copiedLabel == "short",
-                        onCopy = {
-                            copyText(context, result.shortVersion)
-                            copiedLabel = "short"
+                if (result.isDirectMatch) {
+                    // RAG 直接匹配模式：展示相似历史回答
+                    item {
+                        Text(
+                            "相似历史回答（${result.ragMatches.size} 条）",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    result.ragMatches.forEachIndexed { index, match ->
+                        item {
+                            RagMatchCard(
+                                rank = index + 1,
+                                match = match,
+                                copied = copiedLabel == "rag_$index",
+                                onCopy = {
+                                    copyText(context, match.answer)
+                                    copiedLabel = "rag_$index"
+                                }
+                            )
                         }
-                    )
-                }
+                    }
+                } else {
+                    // RAG + AI 模式：展示 AI 生成的三版回复
+                    if (result.isSensitive) {
+                        item { SensitiveWarning(note = result.sensitiveNote) }
+                    }
 
-                item {
-                    ReplyCard(
-                        label = "自然版",
-                        labelColor = MaterialTheme.colorScheme.secondary,
-                        content = result.naturalVersion,
-                        copied = copiedLabel == "natural",
-                        onCopy = {
-                            copyText(context, result.naturalVersion)
-                            copiedLabel = "natural"
-                        }
-                    )
-                }
+                    item {
+                        ReplyCard(
+                            label = "简短版",
+                            labelColor = MaterialTheme.colorScheme.primary,
+                            content = result.shortVersion,
+                            copied = copiedLabel == "short",
+                            onCopy = {
+                                copyText(context, result.shortVersion)
+                                copiedLabel = "short"
+                            }
+                        )
+                    }
 
-                item {
-                    ReplyCard(
-                        label = "邀约版",
-                        labelColor = MaterialTheme.colorScheme.tertiary,
-                        content = result.inviteVersion,
-                        copied = copiedLabel == "invite",
-                        onCopy = {
-                            copyText(context, result.inviteVersion)
-                            copiedLabel = "invite"
-                        }
-                    )
-                }
+                    item {
+                        ReplyCard(
+                            label = "自然版",
+                            labelColor = MaterialTheme.colorScheme.secondary,
+                            content = result.naturalVersion,
+                            copied = copiedLabel == "natural",
+                            onCopy = {
+                                copyText(context, result.naturalVersion)
+                                copiedLabel = "natural"
+                            }
+                        )
+                    }
 
-                item { MetaInfo(result = result) }
+                    item {
+                        ReplyCard(
+                            label = "邀约版",
+                            labelColor = MaterialTheme.colorScheme.tertiary,
+                            content = result.inviteVersion,
+                            copied = copiedLabel == "invite",
+                            onCopy = {
+                                copyText(context, result.inviteVersion)
+                                copiedLabel = "invite"
+                            }
+                        )
+                    }
+
+                    item { MetaInfo(result = result) }
+                }
 
                 if (state.referencedQas.isNotEmpty()) {
                     item { ReferenceSources(items = state.referencedQas) }
@@ -245,6 +272,62 @@ private fun MetaRow(label: String, value: String, isWarning: Boolean = false) {
             fontSize = 12.sp,
             color = if (isWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
         )
+    }
+}
+
+@Composable
+private fun RagMatchCard(rank: Int, match: RagMatch, copied: Boolean, onCopy: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "#$rank",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    match.scene,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                val pct = (match.score * 100).toInt()
+                Text(
+                    "${pct}%",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            FilledTonalButton(
+                onClick = onCopy,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.height(30.dp)
+            ) {
+                if (copied) {
+                    Text("已复制 ✓", fontSize = 12.sp)
+                } else {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("复制", fontSize = 12.sp)
+                }
+            }
+        }
+        Text(match.answer, fontSize = 14.sp, lineHeight = 22.sp)
     }
 }
 

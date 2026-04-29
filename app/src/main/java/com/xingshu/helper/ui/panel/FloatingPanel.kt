@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import com.xingshu.helper.data.model.BasketMessage
 import com.xingshu.helper.data.model.DialogMessage
 import com.xingshu.helper.data.model.DialogRole
+import com.xingshu.helper.data.model.GenerateMode
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.data.model.VisionState
@@ -311,7 +312,8 @@ private fun ActionButtons(state: PanelUiState, viewModel: PanelViewModel, isLoad
         Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                Text("正在生成回复…", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val loadingText = if (state.generateMode == GenerateMode.RAG_ONLY) "正在检索相似问题…" else "正在生成回复…"
+                Text(loadingText, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         return
@@ -319,6 +321,26 @@ private fun ActionButtons(state: PanelUiState, viewModel: PanelViewModel, isLoad
 
     // dialog 模式下，"加入本轮 / 单条生成" 这两个剪贴板按钮不再有意义 —— 隐藏掉
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // RAG 模式选择
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val ragOnlySelected = state.generateMode == GenerateMode.RAG_ONLY
+            OutlinedButton(
+                onClick = { viewModel.setGenerateMode(GenerateMode.RAG_ONLY) },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (ragOnlySelected) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surface
+                )
+            ) { Text("直接匹配", fontSize = 12.sp) }
+            OutlinedButton(
+                onClick = { viewModel.setGenerateMode(GenerateMode.RAG_PLUS_AI) },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (!ragOnlySelected) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surface
+                )
+            ) { Text("RAG + AI", fontSize = 12.sp) }
+        }
         if (!hasDialog) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
