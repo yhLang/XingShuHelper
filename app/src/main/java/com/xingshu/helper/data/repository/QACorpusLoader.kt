@@ -8,6 +8,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -38,6 +40,7 @@ class QACorpusLoader(private val context: Context) {
                 questions = listOf(obj["question"]?.jsonPrimitive?.content ?: ""),
                 answer = obj["answer"]?.jsonPrimitive?.content ?: "",
                 riskNote = obj["risk_note"]?.jsonPrimitive?.content ?: "",
+                isGold = obj["is_gold"]?.jsonPrimitive?.booleanOrNull ?: false,
             )
         }
     }

@@ -127,13 +127,29 @@ object QALibrary {
     fun buildPrompt(contextItems: List<QAItem>): String = buildString {
         appendLine(ROLE_INSTRUCTION)
         appendLine()
-        if (contextItems.isNotEmpty()) {
-            appendLine("## 相关话术参考")
+        // 把金标话术单独提到前面用更强语气标注，让 LLM 优先采用其措辞
+        val gold = contextItems.filter { it.isGold }
+        val others = contextItems.filterNot { it.isGold }
+
+        if (gold.isNotEmpty()) {
+            appendLine("## 标准话术（高置信度，请优先采用其措辞、长度和语气）")
             appendLine()
-            contextItems.forEach { qa ->
+            gold.forEach { qa ->
+                appendLine("【${qa.scene}】")
+                appendLine("客户问法：${qa.questions.joinToString("、")}")
+                appendLine("推荐回复：${qa.answer}")
+                if (qa.riskNote.isNotBlank()) appendLine("注意：${qa.riskNote}")
+                appendLine()
+            }
+        }
+
+        if (others.isNotEmpty()) {
+            appendLine("## 历史对话参考（仅供参考，措辞可灵活调整）")
+            appendLine()
+            others.forEach { qa ->
                 appendLine("【${qa.scene}】")
                 appendLine("常见问题：${qa.questions.joinToString("、")}")
-                appendLine("标准回复：${qa.answer}")
+                appendLine("历史回复：${qa.answer}")
                 if (qa.riskNote.isNotBlank()) appendLine("注意：${qa.riskNote}")
                 appendLine()
             }

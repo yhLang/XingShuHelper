@@ -18,9 +18,21 @@ class VectorStore {
         val snapshot = entries
         if (snapshot.isEmpty()) return emptyList()
         return snapshot
-            .map { (item, vec) -> item to cosineSimilarity(query, vec) }
-            .sortedByDescending { it.second }
+            .map { (item, vec) ->
+                val raw = cosineSimilarity(query, vec)
+                // 金标话术加分（boost），让人工挑选的高质量回复更容易进 top-K
+                val boosted = if (item.isGold) raw + GOLD_BOOST else raw
+                Triple(item, raw, boosted)
+            }
+            .sortedByDescending { it.third }
             .take(topK)
+            // 排序用 boosted，但展示给 UI 的还是原始相似度，避免误导
+            .map { (item, raw, _) -> item to raw }
+    }
+
+    companion object {
+        /** 金标条目相似度加分。0.05 ≈ 在 0.5-0.8 区间内提升约 2-3 名。 */
+        private const val GOLD_BOOST = 0.05f
     }
 
     private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
