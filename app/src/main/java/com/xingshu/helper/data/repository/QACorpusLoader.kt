@@ -28,15 +28,24 @@ class QACorpusLoader(private val context: Context) {
         }
         val store = LocalGoldStore(context)
         val demoted = store.loadDemoted(account)
-        // assets 是只读的，因此「降级」只能在加载阶段把 isGold 强制翻 false
-        val assetEntries = items.zip(vecs).map { (item, vec) ->
+        val localGold = store.load(account)
+        // 本地金标里的 question 集合，用于覆盖（剔除）assets 中同 question 的条目，
+        // 避免同一 question 同时出现 assets 原版 + 本地修订版（会导致 RAG 召回重复、UI 上⭐操作"同步翻转"）
+        val localQuestions = localGold.mapNotNull { (item, _) -> item.questions.firstOrNull() }
+            .filter { it.isNotBlank() }
+            .toHashSet()
+        val assetEntries = items.zip(vecs).mapNotNull { (item, vec) ->
             val q = item.questions.firstOrNull().orEmpty()
+            // 已经有本地修订版的 question：assets 原版直接丢掉
+            if (q in localQuestions) return@mapNotNull null
+            // assets 是只读的，因此「降级」只能在加载阶段把 isGold 强制翻 false
             if (item.isGold && q in demoted) item.copy(isGold = false) to vec else item to vec
         }
-        // 合并用户在 App 内添加的本地金标
-        val localGold = store.load(account)
         if (localGold.isNotEmpty()) {
-            android.util.Log.d("QACorpusLoader", "合并本地金标 [${account.key}]: ${localGold.size} 条")
+            android.util.Log.d(
+                "QACorpusLoader",
+                "合并本地金标 [${account.key}]: ${localGold.size} 条；覆盖 assets ${localQuestions.size} 条"
+            )
         }
         if (demoted.isNotEmpty()) {
             android.util.Log.d("QACorpusLoader", "应用金标降级 [${account.key}]: ${demoted.size} 条")

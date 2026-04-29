@@ -21,20 +21,15 @@ class VectorStore {
     }
 
     /**
-     * 按 question 替换 isLocal 条目，或追加新的 isLocal 条目。
-     * assets 来源（isLocal=false）保留不动；本地修订版会替换同 question 的旧本地版或新增。
+     * 按 question 替换/追加为新本地条目。
+     * 同 question 的 assets 原版会被剔除——避免 RAG 召回同 question 的多份重复条目，
+     * 也确保按 question 维度的金标⭐操作不会"同步翻转"两条。
      */
     fun upsertByQuestion(question: String, newItem: QAItem, newVec: FloatArray) {
-        val updated = entries.toMutableList()
-        val existing = updated.indexOfFirst { (item, _) ->
-            item.isLocal && item.questions.firstOrNull() == question
+        val filtered = entries.filterNot { (item, _) ->
+            item.questions.firstOrNull() == question
         }
-        if (existing >= 0) {
-            updated[existing] = newItem to newVec
-        } else {
-            updated.add(newItem to newVec)
-        }
-        entries = updated
+        entries = filtered + (newItem to newVec)
     }
 
     /** 找回 question 对应的向量（编辑 answer 时复用原向量，不需重新调 embedding API）。 */
