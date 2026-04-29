@@ -6,6 +6,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.xingshu.helper.AppConfig
+import com.xingshu.helper.data.account.AccountManager
+import com.xingshu.helper.data.account.BusinessAccount
 import com.xingshu.helper.data.model.BasketMessage
 import com.xingshu.helper.data.model.DialogMessage
 import com.xingshu.helper.data.model.DialogRole
@@ -34,7 +36,9 @@ data class PanelUiState(
     val currentScreen: PanelScreen = PanelScreen.MAIN,
     val snackbar: String? = null,
     val dialogMessages: List<DialogMessage> = emptyList(),
-    val visionState: VisionState = VisionState.Idle
+    val visionState: VisionState = VisionState.Idle,
+    val account: BusinessAccount = BusinessAccount.KIRIN,
+    val corpusReady: Boolean = false,
 )
 
 enum class ClipboardStatus { EMPTY, OK, DUPLICATE, TOO_LONG }
@@ -49,24 +53,22 @@ class PanelViewModel(
     private val visionRepository: VisionRepository,
     private val embeddingRepository: EmbeddingRepository,
     private val vectorStore: VectorStore,
+    private val accountManager: AccountManager,
     private val appContext: Context
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(PanelUiState())
+    private val _state = MutableStateFlow(PanelUiState(account = accountManager.current.value))
     val uiState: StateFlow<PanelUiState> = _state
 
     private val _events = MutableSharedFlow<PanelEvent>(extraBufferCapacity = 4)
     val events: SharedFlow<PanelEvent> = _events
 
     init {
-        // 后台加载 RAG 语料库（~11MB，首次约 1-2 秒）
+        // 监听账号切换，每次切换都重新加载对应语料库
         viewModelScope.launch {
-            try {
-                val corpus = QACorpusLoader(appContext).load()
-                vectorStore.initialize(corpus)
-                android.util.Log.d("PanelViewModel", "RAG 语料库加载完成: ${corpus.size} 条")
-            } catch (e: Exception) {
-                android.util.Log.e("PanelViewModel", "RAG 语料库加载失败: ${e.message}")
+            accountManager.current.collect { account ->
+                _state.update { it.copy(account = account, corpusReady = false) }
+                loadCorpus(account)
             }
         }
 
@@ -154,6 +156,24 @@ class PanelViewModel(
         showSnackbar("识别 ${messages.size} 条对话，客户消息 ${customerTexts.size} 条已加入本轮")
     }
 
+    private suspend fun loadCorpus(account: BusinessAccount) {
+        try {
+            val corpus = QACorpusLoader(appContext).load(account)
+            vectorStore.initialize(corpus)
+            _state.update { it.copy(corpusReady = true) }
+            android.util.Log.d("PanelViewModel", "RAG 语料库加载完成 [${account.key}]: ${corpus.size} 条")
+        } catch (e: Exception) {
+            _state.update { it.copy(corpusReady = false) }
+            android.util.Log.e("PanelViewModel", "RAG 语料库加载失败 [${account.key}]: ${e.message}")
+        }
+    }
+
+    fun switchAccount(account: BusinessAccount) {
+        if (account == accountManager.current.value) return
+        accountManager.set(account)
+        showSnackbar("已切换到 ${account.displayName}，正在加载话术库…")
+    }
+
     fun clearVisionState() {
         _state.update { it.copy(visionState = VisionState.Idle, dialogMessages = emptyList()) }
     }
@@ -202,6 +222,12 @@ class PanelViewModel(
     }
 
     fun generateSingle() {
+        // 有 OCR 对话上下文优先走对话路径（带"我"的历史回复），更准确
+        val dialog = _state.value.dialogMessages
+        if (dialog.isNotEmpty()) {
+            doGenerateFromDialog(dialog)
+            return
+        }
         val text = _state.value.clipboardPreview
         if (text.isBlank()) {
             showSnackbar("剪贴板为空，请先在微信复制客户消息")
@@ -211,6 +237,12 @@ class PanelViewModel(
     }
 
     fun generateFromBasket() {
+        // 有 OCR 对话上下文优先走对话路径
+        val dialog = _state.value.dialogMessages
+        if (dialog.isNotEmpty()) {
+            doGenerateFromDialog(dialog)
+            return
+        }
         val messages = _state.value.basket.map { it.content }
         if (messages.isEmpty()) {
             showSnackbar("本轮还没有收集消息")
@@ -221,21 +253,35 @@ class PanelViewModel(
 
     private fun doGenerate(messages: List<String>) {
         viewModelScope.launch {
-            val contextItems = if (vectorStore.isReady) {
-                val query = messages.joinToString("\n")
-                val queryVec = embeddingRepository.embed(query, AppConfig.API_KEY, AppConfig.API_BASE_URL)
-                if (queryVec != null) {
-                    vectorStore.search(queryVec, topK = 5).map { (item, _) -> item }
-                } else emptyList()
-            } else emptyList()
-
+            val contextItems = retrieveContext(messages.joinToString("\n"))
             aiRepository.generate(messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems)
-                .collect { state ->
-                    _state.update { it.copy(generateState = state) }
-                    if (state is GenerateState.Success || state is GenerateState.Error) {
-                        _state.update { it.copy(currentScreen = PanelScreen.RESULT) }
-                    }
-                }
+                .collect { collectGenerateState(it) }
+        }
+    }
+
+    private fun doGenerateFromDialog(dialog: List<DialogMessage>) {
+        viewModelScope.launch {
+            // 检索时只用客户那边的话，否则会把"我"的旧回复混进 RAG query 影响相似度
+            val customerOnly = dialog.filter { it.role == DialogRole.CUSTOMER }
+                .joinToString("\n") { it.text }
+            val contextItems = retrieveContext(customerOnly)
+            aiRepository.generateFromDialog(
+                dialog, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
+            ).collect { collectGenerateState(it) }
+        }
+    }
+
+    private suspend fun retrieveContext(query: String): List<com.xingshu.helper.data.model.QAItem> {
+        if (!vectorStore.isReady || query.isBlank()) return emptyList()
+        val queryVec = embeddingRepository.embed(query, AppConfig.API_KEY, AppConfig.API_BASE_URL)
+            ?: return emptyList()
+        return vectorStore.search(queryVec, topK = 5).map { (item, _) -> item }
+    }
+
+    private fun collectGenerateState(state: GenerateState) {
+        _state.update { it.copy(generateState = state) }
+        if (state is GenerateState.Success || state is GenerateState.Error) {
+            _state.update { it.copy(currentScreen = PanelScreen.RESULT) }
         }
     }
 
@@ -259,6 +305,7 @@ class PanelViewModel(
                 VisionRepository(),
                 EmbeddingRepository(),
                 VectorStore(),
+                AccountManager(context.applicationContext),
                 context.applicationContext
             ) as T
         }

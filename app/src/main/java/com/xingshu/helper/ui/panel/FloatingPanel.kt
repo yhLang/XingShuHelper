@@ -59,7 +59,11 @@ fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
                 when (state.currentScreen) {
                     PanelScreen.MAIN -> MainContent(state = state, viewModel = viewModel)
                     PanelScreen.RESULT -> ResultContent(state = state, viewModel = viewModel)
-                    PanelScreen.SETTINGS -> SettingsContent()
+                    PanelScreen.SETTINGS -> SettingsContent(
+                        currentAccount = state.account,
+                        corpusReady = state.corpusReady,
+                        onSwitchAccount = { viewModel.switchAccount(it) }
+                    )
                 }
 
                 state.snackbar?.let { msg ->
