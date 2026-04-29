@@ -123,37 +123,27 @@ class PanelViewModel(
     }
 
     private fun applyDialogMessages(messages: List<DialogMessage>) {
+        val customerCount = messages.count { it.role == DialogRole.CUSTOMER }
+        val meCount = messages.count { it.role == DialogRole.ME }
         android.util.Log.d(
             "PanelViewModel",
-            "applyDialogMessages: total=${messages.size}, " +
-                "customer=${messages.count { it.role == DialogRole.CUSTOMER }}, " +
-                "me=${messages.count { it.role == DialogRole.ME }}"
+            "applyDialogMessages: total=${messages.size}, customer=$customerCount, me=$meCount"
         )
         if (messages.isEmpty()) {
-            // 不动 basket，但提示用户结果为空
-            _state.update { it.copy(dialogMessages = emptyList()) }
+            _state.update { it.copy(dialogMessages = emptyList(), visionState = VisionState.Idle) }
             showSnackbar("未识别到对话内容（截图可能未抓到聊天界面）")
             return
         }
-        val customerTexts = messages
-            .filter { it.role == DialogRole.CUSTOMER }
-            .map { it.text }
-            .distinct()
-            .takeLast(10)
-        if (customerTexts.isEmpty()) {
-            _state.update { it.copy(dialogMessages = messages) }
-            showSnackbar("识别 ${messages.size} 条对话，但都是我自己发的")
-            return
-        }
-        // 每次 OCR 视为"重新抓取本轮上下文"——清空旧 basket，灌入新客户消息
-        _state.update { state ->
-            state.copy(
-                basket = customerTexts.map { BasketMessage(content = it) },
+        // OCR 模式：dialogMessages 是单一真源，UI 直接渲染气泡
+        // 清空 basket 是为了让 UI 切到 dialog 视图，不再显示残留的剪贴板条目
+        _state.update {
+            it.copy(
                 dialogMessages = messages,
+                basket = emptyList(),
                 visionState = VisionState.Idle
             )
         }
-        showSnackbar("识别 ${messages.size} 条对话，客户消息 ${customerTexts.size} 条已加入本轮")
+        showSnackbar("已识别 ${messages.size} 条对话（客户 $customerCount / 我 $meCount）")
     }
 
     private suspend fun loadCorpus(account: BusinessAccount) {
@@ -176,6 +166,21 @@ class PanelViewModel(
 
     fun clearVisionState() {
         _state.update { it.copy(visionState = VisionState.Idle, dialogMessages = emptyList()) }
+    }
+
+    /** 用户手动删除某条 OCR 出来的对话（索引基础） */
+    fun removeDialogMessage(index: Int) {
+        _state.update { state ->
+            val list = state.dialogMessages
+            if (index !in list.indices) state else state.copy(
+                dialogMessages = list.toMutableList().apply { removeAt(index) }
+            )
+        }
+    }
+
+    /** 清空 OCR 对话上下文，回到剪贴板手动模式 */
+    fun clearDialog() {
+        _state.update { it.copy(dialogMessages = emptyList(), basket = emptyList()) }
     }
 
     fun readClipboard() {
