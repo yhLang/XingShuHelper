@@ -72,7 +72,7 @@ class AIRepository {
             }
             appendLine()
             appendLine("请基于完整对话上下文，为客户最后一句（或最近未回复的消息）生成回复草稿。")
-            appendLine("注意：参考"我"已经说过的话，不要重复或自相矛盾。")
+            appendLine("注意：参考[我]已经说过的话，不要重复或自相矛盾。")
         }
         return runChatCompletion(userContent, apiKey, baseUrl, contextItems)
     }
