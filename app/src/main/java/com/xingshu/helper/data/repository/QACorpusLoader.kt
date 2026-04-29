@@ -34,22 +34,21 @@ class QACorpusLoader(private val context: Context) {
         val localQuestions = localGold.mapNotNull { (item, _) -> item.questions.firstOrNull() }
             .filter { it.isNotBlank() }
             .toHashSet()
+        // 只保留 assets 里的金标条目；非金标的 assets 条目（用户编辑也无法持久化）整体丢弃。
+        // 用户主动降级（demoted）的金标也一并丢弃。
         val assetEntries = items.zip(vecs).mapNotNull { (item, vec) ->
             val q = item.questions.firstOrNull().orEmpty()
-            // 已经有本地修订版的 question：assets 原版直接丢掉
             if (q in localQuestions) return@mapNotNull null
-            // assets 是只读的，因此「降级」只能在加载阶段把 isGold 强制翻 false
-            if (item.isGold && q in demoted) item.copy(isGold = false) to vec else item to vec
+            if (!item.isGold) return@mapNotNull null
+            if (q in demoted) return@mapNotNull null
+            item to vec
         }
-        if (localGold.isNotEmpty()) {
-            android.util.Log.d(
-                "QACorpusLoader",
-                "合并本地金标 [${account.key}]: ${localGold.size} 条；覆盖 assets ${localQuestions.size} 条"
-            )
-        }
-        if (demoted.isNotEmpty()) {
-            android.util.Log.d("QACorpusLoader", "应用金标降级 [${account.key}]: ${demoted.size} 条")
-        }
+        android.util.Log.d(
+            "QACorpusLoader",
+            "[${account.key}] 加载完成：assets 金标 ${assetEntries.size} 条 + 本地 ${localGold.size} 条" +
+                "；丢弃 assets 非金标 ${items.size - assetEntries.size - localQuestions.size - demoted.size} 条" +
+                "；本地覆盖 ${localQuestions.size} 条；降级 ${demoted.size} 条"
+        )
         assetEntries + localGold
     }
 
