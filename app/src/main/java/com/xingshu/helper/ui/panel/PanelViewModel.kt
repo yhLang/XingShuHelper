@@ -75,8 +75,6 @@ data class AddGoldState(
     val saving: Boolean = false,
     /** 提示消息（用于错误提示等） */
     val errorMessage: String? = null,
-    /** 用户勾选了"同时上传到云端"，让其他设备也能用 */
-    val uploadToCloud: Boolean = false,
 )
 
 /** 暂存最近一次生成的输入，便于用户在结果页选择"结合 AI 重跑"。 */
@@ -207,9 +205,36 @@ class PanelViewModel(
             val version = CorpusSyncManager(appContext).localVersion(account)
             _state.update { it.copy(corpusReady = true, corpusVersion = version) }
             android.util.Log.d("PanelViewModel", "RAG 语料库加载完成 [${account.key}]: ${corpus.size} 条，本地金标版本 $version")
+            // 后台自动同步：拉到新版本静默 reload，UI 用 snackbar 提示
+            autoSyncCorpus(account)
         } catch (e: Exception) {
             _state.update { it.copy(corpusReady = false) }
             android.util.Log.e("PanelViewModel", "RAG 语料库加载失败 [${account.key}]: ${e.message}")
+        }
+    }
+
+    /** 启动后台静默同步金标，与用户操作并行；失败仅写日志，不打扰用户。 */
+    private fun autoSyncCorpus(account: BusinessAccount) {
+        if (!CorpusSyncManager(appContext).isConfigured()) return
+        viewModelScope.launch {
+            val mgr = CorpusSyncManager(appContext)
+            val ok = mgr.sync(account) { s -> _state.update { it.copy(corpusSync = s) } }
+            val finalState = _state.value.corpusSync
+            if (ok && finalState is CorpusSyncManager.State.Updated) {
+                // 拉到了新版本 → 重新加载向量库 + snackbar
+                try {
+                    val corpus = QACorpusLoader(appContext).load(account)
+                    vectorStore.initialize(corpus)
+                    _state.update {
+                        it.copy(
+                            corpusVersion = finalState.version,
+                            snackbar = "金标库已更新到 v${finalState.version}（${finalState.count} 条）",
+                        )
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("PanelViewModel", "自动同步后 reload 失败：${e.message}")
+                }
+            }
         }
     }
 
@@ -332,8 +357,8 @@ class PanelViewModel(
             LocalGoldStore(appContext).append(account, entries)
             vectorStore.appendEntries(entries)
 
-            // 4) 可选：同步上传到云端（让其他设备也能用）。失败不影响本地保存。
-            val cloudMsg = if (current.uploadToCloud && GoldUploader.isConfigured()) {
+            // 4) 自动同步到云端（让其他设备也能用）。失败不影响本地保存。
+            val cloudMsg = if (GoldUploader.isConfigured()) {
                 when (val r = GoldUploader.upload(
                     account = account,
                     scene = sceneFinal,
@@ -354,10 +379,6 @@ class PanelViewModel(
                 )
             }
         }
-    }
-
-    fun setUploadToCloud(on: Boolean) {
-        _state.update { it.copy(addGold = it.addGold.copy(uploadToCloud = on)) }
     }
 
     /**

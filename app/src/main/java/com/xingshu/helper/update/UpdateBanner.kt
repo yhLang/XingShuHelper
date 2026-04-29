@@ -27,12 +27,15 @@ fun UpdateBanner() {
     var ready by remember { mutableStateOf<File?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    // 启动时检查更新——只跑一次，不依赖任何外部 state，不会被取消
+    // 启动时检查更新——发现新版本立即触发自动下载（无需点按钮）
     LaunchedEffect(Unit) {
         try {
             UpdateChecker.check().collect { s ->
                 when (s) {
-                    is UpdateChecker.State.Available -> available = s
+                    is UpdateChecker.State.Available -> {
+                        available = s
+                        downloading = true   // 自动开始下载
+                    }
                     is UpdateChecker.State.Error -> error = s.message
                     else -> Unit
                 }
@@ -42,7 +45,7 @@ fun UpdateBanner() {
         }
     }
 
-    // 下载触发：用户点"下载并安装"才开始；用户点"取消"会把 downloading 设回 false → 协程被取消
+    // 下载触发：用户点"取消"会把 downloading 设回 false → 协程被取消
     LaunchedEffect(downloading) {
         if (!downloading) return@LaunchedEffect
         val a = available ?: run {
