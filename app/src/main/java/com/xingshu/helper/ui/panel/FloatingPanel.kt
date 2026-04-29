@@ -159,14 +159,14 @@ private fun MainContent(state: PanelUiState, viewModel: PanelViewModel) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Auto-capture entry
-        item {
-            CaptureSection(state = state, viewModel = viewModel, isLoading = isLoading)
-        }
-
-        // Clipboard preview
+        // 首推：剪贴板模式（精准、可控，操作直观）
         item {
             ClipboardSection(state = state, viewModel = viewModel, isLoading = isLoading)
+        }
+
+        // 备用：OCR 截屏识别（信息量大、长对话时使用）
+        item {
+            CaptureSection(state = state, viewModel = viewModel, isLoading = isLoading)
         }
 
         // Action buttons
@@ -237,15 +237,15 @@ private fun CaptureSection(state: PanelUiState, viewModel: PanelViewModel, isLoa
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.primaryContainer)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Text(
-            "📸 截屏识别对话",
+            "📸 截屏识别（长对话备用）",
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onPrimaryContainer
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
             text = if (hasProjection) {
@@ -254,9 +254,9 @@ private fun CaptureSection(state: PanelUiState, viewModel: PanelViewModel, isLoa
                 "首次需授权截屏，之后可一键直抓"
             },
             fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onPrimaryContainer
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Button(
+        OutlinedButton(
             onClick = { viewModel.startScreenCapture() },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth()
@@ -273,7 +273,7 @@ private fun CaptureSection(state: PanelUiState, viewModel: PanelViewModel, isLoa
             Text(
                 "上次识别：${state.dialogMessages.size} 条（客户 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.CUSTOMER }} / 我 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.ME }}）",
                 fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -285,7 +285,7 @@ private fun ClipboardSection(state: PanelUiState, viewModel: PanelViewModel, isL
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(MaterialTheme.colorScheme.primaryContainer)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -294,31 +294,67 @@ private fun ClipboardSection(state: PanelUiState, viewModel: PanelViewModel, isL
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("剪贴板内容", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            TextButton(
-                onClick = { viewModel.readClipboard() },
-                enabled = !isLoading,
-                contentPadding = PaddingValues(0.dp)
-            ) {
-                Text("刷新", fontSize = 12.sp)
-            }
+            Text(
+                "📋 剪贴板识别（推荐）",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+        Text(
+            "在微信长按客户消息→复制，然后点下方按钮读取",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onPrimaryContainer
+        )
+        Button(
+            onClick = { viewModel.readClipboard() },
+            enabled = !isLoading,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("读取剪贴板")
         }
 
         when (state.clipboardStatus) {
             ClipboardStatus.EMPTY -> Text(
                 "未检测到内容，请先在微信复制客户消息",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
             )
             ClipboardStatus.DUPLICATE -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(state.clipboardPreview, fontSize = 13.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                Text("⚠ 该内容已在本轮中", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                Text(
+                    state.clipboardPreview,
+                    fontSize = 13.sp,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    "⚠ 该内容已在本轮中",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
             ClipboardStatus.TOO_LONG -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(state.clipboardPreview, fontSize = 13.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                Text("内容较长（${state.clipboardPreview.length} 字），建议只保留关键问题", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                Text(
+                    state.clipboardPreview,
+                    fontSize = 13.sp,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    "内容较长（${state.clipboardPreview.length} 字），建议只保留关键问题",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
-            ClipboardStatus.OK -> Text(state.clipboardPreview, fontSize = 14.sp, maxLines = 5, overflow = TextOverflow.Ellipsis)
+            ClipboardStatus.OK -> Text(
+                state.clipboardPreview,
+                fontSize = 14.sp,
+                maxLines = 5,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
         }
     }
 }
