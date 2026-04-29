@@ -13,22 +13,31 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
 
 class EmbeddingRepository {
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
+    private val client = sharedHttpClient
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun embed(text: String, apiKey: String, baseUrl: String): FloatArray? =
-        embedBatch(listOf(text), apiKey, baseUrl)?.firstOrNull()
+    /**
+     * 单条 query embedding 的 LRU 缓存。客服在一轮会话里反复点"生成"或"结合 AI"
+     * 时 query 文本基本不变，命中可直接省掉一次 200-500ms 的网络往返。
+     * 容量 32 条，accessOrder=true 让 LinkedHashMap 表现为 LRU。
+     */
+    private val cache = object : LinkedHashMap<String, FloatArray>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, FloatArray>): Boolean = size > 32
+    }
+    private val cacheLock = Any()
+
+    suspend fun embed(text: String, apiKey: String, baseUrl: String): FloatArray? {
+        synchronized(cacheLock) { cache[text]?.let { return it } }
+        val result = embedBatch(listOf(text), apiKey, baseUrl)?.firstOrNull() ?: return null
+        synchronized(cacheLock) { cache[text] = result }
+        return result
+    }
 
     suspend fun embedBatch(
         texts: List<String>,

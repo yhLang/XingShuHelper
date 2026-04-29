@@ -112,6 +112,14 @@ class PanelViewModel(
     // 每次开新生成前先取消上一个，保证只有最新一次的回调能写入状态。
     private var generateJob: Job? = null
 
+    // 已加载过的语料库内存缓存：账号来回切换时不再重复读盘 + 解析 JSON。
+    // 任何写入 LocalGoldStore 或 corpus sync 后必须 invalidate 对应账号的 entry。
+    private val corpusCache = mutableMapOf<BusinessAccount, List<Pair<QAItem, FloatArray>>>()
+
+    private fun invalidateCorpusCache(account: BusinessAccount) {
+        corpusCache.remove(account)
+    }
+
     init {
         // 监听账号切换，每次切换都重新加载对应语料库 + 常用片段
         viewModelScope.launch {
@@ -200,11 +208,15 @@ class PanelViewModel(
 
     private suspend fun loadCorpus(account: BusinessAccount) {
         try {
-            val corpus = QACorpusLoader(appContext).load(account)
+            val cached = corpusCache[account]
+            val corpus = cached ?: QACorpusLoader(appContext).load(account).also {
+                corpusCache[account] = it
+            }
             vectorStore.initialize(corpus)
             val version = CorpusSyncManager(appContext).localVersion(account)
             _state.update { it.copy(corpusReady = true, corpusVersion = version) }
-            android.util.Log.d("PanelViewModel", "RAG 语料库加载完成 [${account.key}]: ${corpus.size} 条，本地金标版本 $version")
+            val src = if (cached != null) "缓存" else "磁盘"
+            android.util.Log.d("PanelViewModel", "RAG 语料库加载完成 [${account.key}]: ${corpus.size} 条（来自$src），本地金标版本 $version")
             // 后台自动同步：拉到新版本静默 reload，UI 用 snackbar 提示
             autoSyncCorpus(account)
         } catch (e: Exception) {
@@ -221,9 +233,11 @@ class PanelViewModel(
             val ok = mgr.sync(account) { s -> _state.update { it.copy(corpusSync = s) } }
             val finalState = _state.value.corpusSync
             if (ok && finalState is CorpusSyncManager.State.Updated) {
-                // 拉到了新版本 → 重新加载向量库 + snackbar
+                // 拉到了新版本 → 失效缓存 + 重新加载向量库 + snackbar
+                invalidateCorpusCache(account)
                 try {
                     val corpus = QACorpusLoader(appContext).load(account)
+                    corpusCache[account] = corpus
                     vectorStore.initialize(corpus)
                     _state.update {
                         it.copy(
@@ -247,6 +261,7 @@ class PanelViewModel(
                 _state.update { it.copy(corpusSync = s) }
             }
             if (ok && _state.value.corpusSync is CorpusSyncManager.State.Updated) {
+                invalidateCorpusCache(account)
                 loadCorpus(account)
             }
         }
@@ -356,6 +371,7 @@ class PanelViewModel(
             // 3) 持久化 + 立刻 push 到 VectorStore
             LocalGoldStore(appContext).append(account, entries)
             vectorStore.appendEntries(entries)
+            invalidateCorpusCache(account)
 
             // 4) 自动同步到云端（让其他设备也能用）。失败不影响本地保存。
             val cloudMsg = if (GoldUploader.isConfigured()) {
@@ -414,6 +430,7 @@ class PanelViewModel(
                 embedding = vec,
             )
             vectorStore.upsertByQuestion(question, updated, vec)
+            invalidateCorpusCache(account)
             // 同步更新当前 referencedQas 中匹配的那条，UI 立刻看到新 A
             _state.update { st ->
                 st.copy(
@@ -490,6 +507,7 @@ class PanelViewModel(
                 )
             }
             vectorStore.setGoldByQuestion(question, true)
+            invalidateCorpusCache(account)
             applyGoldFlagToState(question, true)
             showSnackbar("已设为金标，已置顶并下次检索继续生效")
         }
@@ -509,6 +527,7 @@ class PanelViewModel(
         viewModelScope.launch {
             LocalGoldStore(appContext).addDemoted(account, question)
             vectorStore.setGoldByQuestion(question, false)
+            invalidateCorpusCache(account)
             applyGoldFlagToState(question, false)
             showSnackbar("已取消金标")
         }

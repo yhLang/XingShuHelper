@@ -62,6 +62,9 @@ class VectorStore {
                 Triple(item, raw, boosted)
             }
             .sortedByDescending { it.third }
+            // 用 raw 过滤掉明显不相关的（金标也得真相关，不靠 boost 兜底）。
+            // 阈值经验值，低于此基本是语料库未覆盖的问题，留着只会误导客服。
+            .filter { it.second >= MIN_SCORE }
             // 按 answer 去重：同一话术可能对应多个 Q 变体，避免 top-K 被同一条 answer 的不同问法占满
             .distinctBy { it.first.answer }
             .take(topK)
@@ -72,6 +75,9 @@ class VectorStore {
     companion object {
         /** 金标条目相似度加分。0.05 ≈ 在 0.5-0.8 区间内提升约 2-3 名。 */
         private const val GOLD_BOOST = 0.05f
+
+        /** 最低相似度阈值。低于此视为"语料库未覆盖"，不返回噪声结果。 */
+        private const val MIN_SCORE = 0.38f
     }
 
     /**
