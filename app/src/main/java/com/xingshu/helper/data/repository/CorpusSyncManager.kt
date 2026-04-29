@@ -126,8 +126,14 @@ class CorpusSyncManager(private val context: Context) {
         }
 
         // 原子替换：先写 tmp + sha256 校验通过 → rename 到目标位置 → 最后写 manifest
-        textsTmp.renameTo(localTextsFile(account))
-        embTmp.renameTo(localEmbeddingsFile(account))
+        val textsOk = textsTmp.renameTo(localTextsFile(account))
+        val embOk = embTmp.renameTo(localEmbeddingsFile(account))
+        if (!textsOk || !embOk) {
+            textsTmp.delete()
+            embTmp.delete()
+            listener(State.Error("文件替换失败（磁盘空间不足或跨分区）"))
+            return@withContext false
+        }
         localManifestFile(account).writeText(json.encodeToString(Manifest.serializer(), manifest))
 
         listener(State.Updated(manifest.version, manifest.count))

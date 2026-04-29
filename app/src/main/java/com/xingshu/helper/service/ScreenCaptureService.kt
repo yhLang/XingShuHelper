@@ -207,6 +207,7 @@ class ScreenCaptureService : Service() {
                     "allSameColor=${sig.isAllSameColor} firstCapture=$isFirstCapture savedTo=$path"
             )
             if (sig.isAllSameColor) {
+                bitmap.recycle()
                 CaptureCoordinator.postError(
                     "截到的是纯色画面（可能是黑屏 / 面板未隐藏），cap=$path"
                 )
@@ -234,6 +235,12 @@ class ScreenCaptureService : Service() {
         return try {
             val baseDir = externalCacheDir ?: cacheDir
             val dir = File(baseDir, "captures").apply { mkdirs() }
+            // 最多保留最近 10 张，避免存储无限累积
+            dir.listFiles()
+                ?.filter { it.name.endsWith(".jpg") }
+                ?.sortedByDescending { it.lastModified() }
+                ?.drop(9)
+                ?.forEach { it.delete() }
             val file = File(dir, "cap_${System.currentTimeMillis()}.jpg")
             FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }
             Log.d(TAG, "saved debug capture: ${file.absolutePath}")
