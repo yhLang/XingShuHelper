@@ -373,77 +373,90 @@ private fun RagMatchCard(
             }
         }
         Text(match.answer, fontSize = 14.sp, lineHeight = 22.sp)
-    }
 
-    if (editing && sourceItem != null) {
-        EditAnswerDialog(
-            scene = sourceItem.scene,
-            question = sourceItem.questions.firstOrNull().orEmpty(),
-            initialAnswer = sourceItem.answer,
-            initialRiskNote = sourceItem.riskNote,
-            onDismiss = { editing = false },
-            onSave = { newAnswer, newRiskNote ->
-                onSave(newAnswer, newRiskNote)
-                editing = false
-            }
-        )
+        if (editing && sourceItem != null) {
+            InlineEditAnswer(
+                scene = sourceItem.scene,
+                question = sourceItem.questions.firstOrNull().orEmpty(),
+                initialAnswer = sourceItem.answer,
+                initialRiskNote = sourceItem.riskNote,
+                onCancel = { editing = false },
+                onSave = { newAnswer, newRiskNote ->
+                    onSave(newAnswer, newRiskNote)
+                    editing = false
+                }
+            )
+        }
     }
 }
 
+/**
+ * 内联展开的编辑区域。注意：悬浮窗在 TYPE_APPLICATION_OVERLAY 下，
+ * Compose AlertDialog 会创建新的 system Window，从 Service Context 启动会因
+ * BadTokenException 闪退，所以这里不能用 Dialog，改用内联展开。
+ */
 @Composable
-private fun EditAnswerDialog(
+private fun InlineEditAnswer(
     scene: String,
     question: String,
     initialAnswer: String,
     initialRiskNote: String,
-    onDismiss: () -> Unit,
+    onCancel: () -> Unit,
     onSave: (String, String) -> Unit,
 ) {
-    var answer by remember { mutableStateOf(initialAnswer) }
-    var riskNote by remember { mutableStateOf(initialRiskNote) }
+    var answer by remember(initialAnswer) { mutableStateOf(initialAnswer) }
+    var riskNote by remember(initialRiskNote) { mutableStateOf(initialRiskNote) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("修订回复", fontSize = 15.sp) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "[$scene] $question",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(
-                    value = answer,
-                    onValueChange = { answer = it },
-                    label = { Text("回复内容 *", fontSize = 12.sp) },
-                    minLines = 3,
-                    maxLines = 8,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = riskNote,
-                    onValueChange = { riskNote = it },
-                    label = { Text("风险提示（可选）", fontSize = 12.sp) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Text(
-                    "保存后会以本地金标形式入库（assets 原版保留），下次同问句优先返回修订版。",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            "修订：[$scene] $question",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        OutlinedTextField(
+            value = answer,
+            onValueChange = { answer = it },
+            label = { Text("回复内容 *", fontSize = 12.sp) },
+            minLines = 3,
+            maxLines = 8,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = riskNote,
+            onValueChange = { riskNote = it },
+            label = { Text("风险提示（可选）", fontSize = 12.sp) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "保存后以本地金标入库，下次同问句优先返回修订版。",
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = onCancel,
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) { Text("取消", fontSize = 12.sp) }
+            Button(
                 onClick = { onSave(answer, riskNote) },
-                enabled = answer.isNotBlank()
-            ) { Text("保存", fontSize = 13.sp) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消", fontSize = 13.sp) }
+                enabled = answer.isNotBlank(),
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) { Text("保存", fontSize = 12.sp) }
         }
-    )
+    }
 }
 
 private fun copyText(context: Context, text: String) {
