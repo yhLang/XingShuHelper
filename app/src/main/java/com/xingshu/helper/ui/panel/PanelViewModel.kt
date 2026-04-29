@@ -21,6 +21,7 @@ import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
 import com.xingshu.helper.data.repository.CorpusSyncManager
 import com.xingshu.helper.data.repository.EmbeddingRepository
+import com.xingshu.helper.data.repository.GoldUploader
 import com.xingshu.helper.data.repository.LocalGoldStore
 import com.xingshu.helper.data.repository.QACorpusLoader
 import com.xingshu.helper.data.repository.SnippetRepository
@@ -74,6 +75,8 @@ data class AddGoldState(
     val saving: Boolean = false,
     /** 提示消息（用于错误提示等） */
     val errorMessage: String? = null,
+    /** 用户勾选了"同时上传到云端"，让其他设备也能用 */
+    val uploadToCloud: Boolean = false,
 )
 
 /** 暂存最近一次生成的输入，便于用户在结果页选择"结合 AI 重跑"。 */
@@ -327,14 +330,32 @@ class PanelViewModel(
             LocalGoldStore(appContext).append(account, entries)
             vectorStore.appendEntries(entries)
 
+            // 4) 可选：同步上传到云端（让其他设备也能用）。失败不影响本地保存。
+            val cloudMsg = if (current.uploadToCloud && GoldUploader.isConfigured()) {
+                when (val r = GoldUploader.upload(
+                    account = account,
+                    scene = sceneFinal,
+                    questions = cleanQs,
+                    answer = current.answer,
+                    riskNote = current.riskNote,
+                )) {
+                    is GoldUploader.Result.Success -> "，已同步到云端"
+                    is GoldUploader.Result.Failure -> "，云端同步失败：${r.message}（仅本地生效）"
+                }
+            } else ""
+
             _state.update { st ->
                 st.copy(
                     addGold = AddGoldState(),
                     currentScreen = PanelScreen.MAIN,
-                    snackbar = "已加入金标库（${cleanQs.size} 条 Q），立即生效",
+                    snackbar = "已加入金标库（${cleanQs.size} 条 Q），立即生效$cloudMsg",
                 )
             }
         }
+    }
+
+    fun setUploadToCloud(on: Boolean) {
+        _state.update { it.copy(addGold = it.addGold.copy(uploadToCloud = on)) }
     }
 
     /**

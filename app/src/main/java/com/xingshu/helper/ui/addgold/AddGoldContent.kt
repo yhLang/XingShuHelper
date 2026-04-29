@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.xingshu.helper.data.repository.GoldUploader
 import com.xingshu.helper.ui.panel.AddGoldState
 import com.xingshu.helper.ui.panel.PanelViewModel
 
@@ -129,6 +130,21 @@ fun AddGoldContent(state: AddGoldState, viewModel: PanelViewModel) {
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.error
             )
+        }
+
+        if (GoldUploader.isConfigured()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = state.uploadToCloud,
+                    onCheckedChange = { viewModel.setUploadToCloud(it) },
+                    enabled = !state.saving,
+                )
+                Text(
+                    "同时上传到云端（让其他设备也能用）",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         Button(
