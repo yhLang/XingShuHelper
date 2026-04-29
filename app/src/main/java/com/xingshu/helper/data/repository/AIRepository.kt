@@ -34,6 +34,108 @@ class AIRepository {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /**
+     * 给一条标准答案反推可能的客户问法（用于添加金标 QA 时 AI 自动生成 Q 变体）。
+     * 返回 5-7 条不同表达的 Q（覆盖直接问/隐晦问/急切语气/客气语气）。
+     * 失败返回空列表。
+     */
+    suspend fun generateQuestionVariants(
+        scene: String,
+        answer: String,
+        apiKey: String,
+        baseUrl: String,
+    ): List<String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        if (answer.isBlank()) return@withContext emptyList()
+
+        val tool = buildJsonObject {
+            put("type", "function")
+            put("function", buildJsonObject {
+                put("name", "submit_questions")
+                put("description", "提交反推出的客户问法列表")
+                put("parameters", buildJsonObject {
+                    put("type", "object")
+                    put("required", buildJsonArray { add(JsonPrimitive("questions")) })
+                    put("properties", buildJsonObject {
+                        put("questions", buildJsonObject {
+                            put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
+                            put("description", "5-7 条家长可能问出的问法，10-30 字")
+                        })
+                    })
+                })
+            })
+        }
+
+        val systemPrompt = """
+你是培训机构话术整理助手。下方给你一条客服的标准回复（A），请反推 5-7 个家长可能问出的问题（Q），覆盖不同表达方式：直接问、隐晦问、急切语气、客气语气、专业术语、口语化等。
+
+要求：
+- 每个 Q 是真实家长会说出的中文短句，10-30 字
+- 不同问法之间表达要有明显差异，不要换字不换意
+- 不要带语气词冗余（如"嗯""啊"），保持自然
+- 只返回 Q 列表，不要写解释或参考答案
+        """.trimIndent()
+
+        val userContent = buildString {
+            append("场景：").appendLine(scene.ifBlank { "未指定" })
+            appendLine()
+            append("标准回复：").appendLine(answer)
+        }
+
+        val body = buildJsonObject {
+            put("model", com.xingshu.helper.AppConfig.CHAT_MODEL)
+            put("max_tokens", 512)
+            put("temperature", 0.7)
+            put("tool_choice", buildJsonObject {
+                put("type", "function")
+                put("function", buildJsonObject { put("name", "submit_questions") })
+            })
+            putJsonArray("tools") { add(tool) }
+            putJsonArray("messages") {
+                add(buildJsonObject {
+                    put("role", "system")
+                    put("content", systemPrompt)
+                })
+                add(buildJsonObject {
+                    put("role", "user")
+                    put("content", userContent)
+                })
+            }
+        }.toString()
+
+        val req = Request.Builder()
+            .url("$baseUrl/chat/completions")
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+
+        try {
+            val resp = client.newCall(req).execute()
+            val text = resp.body?.string() ?: return@withContext emptyList()
+            if (!resp.isSuccessful) {
+                android.util.Log.e("AIRepository", "generateQuestionVariants 失败: ${resp.code} $text")
+                return@withContext emptyList()
+            }
+            val root = json.parseToJsonElement(text) as JsonObject
+            val args = ((root["choices"] as? JsonArray)?.firstOrNull() as? JsonObject)
+                ?.get("message")?.let { it as? JsonObject }
+                ?.get("tool_calls")?.let { it as? JsonArray }
+                ?.firstOrNull()?.let { it as? JsonObject }
+                ?.get("function")?.let { it as? JsonObject }
+                ?.get("arguments")?.jsonPrimitive?.content
+                ?: return@withContext emptyList()
+            val parsed = json.parseToJsonElement(args) as? JsonObject
+            val list = parsed?.get("questions") as? JsonArray
+            list?.mapNotNull { (it as? JsonPrimitive)?.content?.trim() }
+                ?.filter { it.isNotBlank() }
+                ?: emptyList()
+        } catch (e: Exception) {
+            android.util.Log.e("AIRepository", "generateQuestionVariants 异常: ${e.message}")
+            emptyList()
+        }
+    }
+
     fun generate(
         messages: List<String>,
         apiKey: String,

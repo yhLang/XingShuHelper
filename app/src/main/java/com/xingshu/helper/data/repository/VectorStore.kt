@@ -14,6 +14,12 @@ class VectorStore {
         entries = items.toList()
     }
 
+    /** 运行时追加条目，例如用户在 App 里添加新金标 QA 后立即生效。 */
+    fun appendEntries(more: List<Pair<QAItem, FloatArray>>) {
+        if (more.isEmpty()) return
+        entries = entries + more
+    }
+
     fun search(query: FloatArray, topK: Int = 5): List<Pair<QAItem, Float>> {
         val snapshot = entries
         if (snapshot.isEmpty()) return emptyList()

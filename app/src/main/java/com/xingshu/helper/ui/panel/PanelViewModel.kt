@@ -20,6 +20,7 @@ import com.xingshu.helper.data.model.Snippet
 import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
 import com.xingshu.helper.data.repository.EmbeddingRepository
+import com.xingshu.helper.data.repository.LocalGoldStore
 import com.xingshu.helper.data.repository.QACorpusLoader
 import com.xingshu.helper.data.repository.SnippetRepository
 import com.xingshu.helper.data.repository.VectorStore
@@ -50,6 +51,23 @@ data class PanelUiState(
     val snippets: List<Snippet> = emptyList(),
     /** 上一次生成请求的输入，用于结果页"结合 AI 重跑"按钮。 */
     val lastQuery: LastQuery? = null,
+    /** 添加金标 QA 流程的状态。 */
+    val addGold: AddGoldState = AddGoldState(),
+)
+
+/** 添加金标 QA 表单状态。 */
+data class AddGoldState(
+    val scene: String = "",
+    val answer: String = "",
+    val riskNote: String = "",
+    /** AI 反推出的 Q 候选，用户可编辑/删除。 */
+    val questionDrafts: List<String> = emptyList(),
+    /** 当前正在调 LLM 生成 Q 候选 */
+    val generating: Boolean = false,
+    /** 当前正在保存到本地金标库（embedding + 持久化） */
+    val saving: Boolean = false,
+    /** 提示消息（用于错误提示等） */
+    val errorMessage: String? = null,
 )
 
 /** 暂存最近一次生成的输入，便于用户在结果页选择"结合 AI 重跑"。 */
@@ -183,6 +201,115 @@ class PanelViewModel(
         val list = SnippetRepository(appContext).load(account)
         _state.update { it.copy(snippets = list) }
         android.util.Log.d("PanelViewModel", "常用片段加载完成 [${account.key}]: ${list.size} 条")
+    }
+
+    // ─── 添加金标 QA 流程 ──────────────────────────────────────────
+
+    fun updateGoldScene(text: String) {
+        _state.update { it.copy(addGold = it.addGold.copy(scene = text, errorMessage = null)) }
+    }
+
+    fun updateGoldAnswer(text: String) {
+        _state.update { it.copy(addGold = it.addGold.copy(answer = text, errorMessage = null)) }
+    }
+
+    fun updateGoldRiskNote(text: String) {
+        _state.update { it.copy(addGold = it.addGold.copy(riskNote = text)) }
+    }
+
+    fun updateGoldDraft(index: Int, text: String) {
+        _state.update { st ->
+            val list = st.addGold.questionDrafts.toMutableList()
+            if (index in list.indices) list[index] = text
+            st.copy(addGold = st.addGold.copy(questionDrafts = list))
+        }
+    }
+
+    fun removeGoldDraft(index: Int) {
+        _state.update { st ->
+            val list = st.addGold.questionDrafts.toMutableList()
+            if (index in list.indices) list.removeAt(index)
+            st.copy(addGold = st.addGold.copy(questionDrafts = list))
+        }
+    }
+
+    fun addGoldDraftBlank() {
+        _state.update { st -> st.copy(addGold = st.addGold.copy(questionDrafts = st.addGold.questionDrafts + "")) }
+    }
+
+    fun resetGoldForm() {
+        _state.update { it.copy(addGold = AddGoldState()) }
+    }
+
+    /** 让 LLM 根据当前表单的 scene+answer 反推 Q 变体，写入 questionDrafts。 */
+    fun generateGoldQuestionVariants() {
+        val current = _state.value.addGold
+        if (current.answer.isBlank()) {
+            _state.update { it.copy(addGold = it.addGold.copy(errorMessage = "请先填写标准回复")) }
+            return
+        }
+        _state.update { it.copy(addGold = it.addGold.copy(generating = true, errorMessage = null)) }
+        viewModelScope.launch {
+            val list = aiRepository.generateQuestionVariants(
+                scene = current.scene,
+                answer = current.answer,
+                apiKey = AppConfig.API_KEY,
+                baseUrl = AppConfig.API_BASE_URL,
+            )
+            _state.update { st ->
+                st.copy(addGold = st.addGold.copy(
+                    generating = false,
+                    questionDrafts = list,
+                    errorMessage = if (list.isEmpty()) "AI 未返回结果，请检查网络或重试" else null,
+                ))
+            }
+        }
+    }
+
+    /** 把当前表单的 (Q1..Qn, A) 写入本地金标库，立即生效到 VectorStore。 */
+    fun saveGoldToLocal() {
+        val current = _state.value.addGold
+        val account = _state.value.account
+        val cleanQs = current.questionDrafts.map { it.trim() }.filter { it.isNotEmpty() }
+        if (current.answer.isBlank()) {
+            _state.update { it.copy(addGold = it.addGold.copy(errorMessage = "请先填写标准回复")) }
+            return
+        }
+        if (cleanQs.isEmpty()) {
+            _state.update { it.copy(addGold = it.addGold.copy(errorMessage = "至少需要一个 Q 变体（请生成或手动添加）")) }
+            return
+        }
+        _state.update { it.copy(addGold = it.addGold.copy(saving = true, errorMessage = null)) }
+        viewModelScope.launch {
+            // 1) 调 embedding API 给每个 Q 取向量
+            val vecs = embeddingRepository.embedBatch(cleanQs, AppConfig.API_KEY, AppConfig.API_BASE_URL)
+            if (vecs == null || vecs.size != cleanQs.size) {
+                _state.update { it.copy(addGold = it.addGold.copy(saving = false, errorMessage = "Embedding 失败，请检查网络")) }
+                return@launch
+            }
+            // 2) 构造条目（每个 Q 一条 QAItem，共享同 answer）
+            val sceneFinal = current.scene.ifBlank { "其他" }
+            val entries = cleanQs.zip(vecs).map { (q, vec) ->
+                com.xingshu.helper.data.model.QAItem(
+                    scene = sceneFinal,
+                    questions = listOf(q),
+                    answer = current.answer,
+                    riskNote = current.riskNote,
+                    isGold = true,
+                ) to vec
+            }
+            // 3) 持久化 + 立刻 push 到 VectorStore
+            LocalGoldStore(appContext).append(account, entries)
+            vectorStore.appendEntries(entries)
+
+            _state.update { st ->
+                st.copy(
+                    addGold = AddGoldState(),
+                    currentScreen = PanelScreen.MAIN,
+                    snackbar = "已加入金标库（${cleanQs.size} 条 Q），立即生效",
+                )
+            }
+        }
     }
 
     fun switchAccount(account: BusinessAccount) {
