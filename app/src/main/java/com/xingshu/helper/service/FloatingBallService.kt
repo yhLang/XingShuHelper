@@ -83,11 +83,18 @@ class FloatingBallService : Service(),
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
 
         // 监听 ViewModel 发出的面板显隐事件（截屏前隐藏、OCR 完成后弹回）
+        // HidePanel 同时也把悬浮球隐藏，避免出现在截图里影响 OCR
         eventsJob = serviceScope.launch {
             viewModel.events.collect { event ->
                 when (event) {
-                    is PanelEvent.HidePanel -> if (isPanelVisible) removePanel()
-                    is PanelEvent.ShowPanel -> if (!isPanelVisible) showPanel()
+                    is PanelEvent.HidePanel -> {
+                        if (isPanelVisible) removePanel()
+                        ballView?.visibility = android.view.View.GONE
+                    }
+                    is PanelEvent.ShowPanel -> {
+                        ballView?.visibility = android.view.View.VISIBLE
+                        if (!isPanelVisible) showPanel()
+                    }
                 }
             }
         }
