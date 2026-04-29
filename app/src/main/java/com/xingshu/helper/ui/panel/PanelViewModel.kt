@@ -13,6 +13,9 @@ import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
+import com.xingshu.helper.data.repository.EmbeddingRepository
+import com.xingshu.helper.data.repository.QACorpusLoader
+import com.xingshu.helper.data.repository.VectorStore
 import com.xingshu.helper.data.repository.VisionRepository
 import com.xingshu.helper.service.CaptureCoordinator
 import com.xingshu.helper.service.ProjectionRequestActivity
@@ -44,6 +47,8 @@ sealed class PanelEvent {
 class PanelViewModel(
     private val aiRepository: AIRepository,
     private val visionRepository: VisionRepository,
+    private val embeddingRepository: EmbeddingRepository,
+    private val vectorStore: VectorStore,
     private val appContext: Context
 ) : ViewModel() {
 
@@ -54,6 +59,17 @@ class PanelViewModel(
     val events: SharedFlow<PanelEvent> = _events
 
     init {
+        // 后台加载 RAG 语料库（~11MB，首次约 1-2 秒）
+        viewModelScope.launch {
+            try {
+                val corpus = QACorpusLoader(appContext).load()
+                vectorStore.initialize(corpus)
+                android.util.Log.d("PanelViewModel", "RAG 语料库加载完成: ${corpus.size} 条")
+            } catch (e: Exception) {
+                android.util.Log.e("PanelViewModel", "RAG 语料库加载失败: ${e.message}")
+            }
+        }
+
         // 监听 ScreenCaptureService 的截屏结果，自动跑 OCR 并写入对话状态
         viewModelScope.launch {
             CaptureCoordinator.events.collect { event ->
@@ -205,7 +221,15 @@ class PanelViewModel(
 
     private fun doGenerate(messages: List<String>) {
         viewModelScope.launch {
-            aiRepository.generate(messages, AppConfig.API_KEY, AppConfig.API_BASE_URL)
+            val contextItems = if (vectorStore.isReady) {
+                val query = messages.joinToString("\n")
+                val queryVec = embeddingRepository.embed(query, AppConfig.API_KEY, AppConfig.API_BASE_URL)
+                if (queryVec != null) {
+                    vectorStore.search(queryVec, topK = 5).map { (item, _) -> item }
+                } else emptyList()
+            } else emptyList()
+
+            aiRepository.generate(messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems)
                 .collect { state ->
                     _state.update { it.copy(generateState = state) }
                     if (state is GenerateState.Success || state is GenerateState.Error) {
@@ -233,6 +257,8 @@ class PanelViewModel(
             return PanelViewModel(
                 AIRepository(),
                 VisionRepository(),
+                EmbeddingRepository(),
+                VectorStore(),
                 context.applicationContext
             ) as T
         }

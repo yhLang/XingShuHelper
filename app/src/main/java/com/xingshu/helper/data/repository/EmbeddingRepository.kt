@@ -37,7 +37,7 @@ class EmbeddingRepository {
     ): List<FloatArray>? = withContext(Dispatchers.IO) {
         try {
             val body = buildJsonObject {
-                put("model", "text-embedding-v4")
+                put("model", "text-embedding-v3")
                 putJsonArray("input") { texts.forEach { add(JsonPrimitive(it)) } }
                 put("encoding_format", "float")
             }.toString()

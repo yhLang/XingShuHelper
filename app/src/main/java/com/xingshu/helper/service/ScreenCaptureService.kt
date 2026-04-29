@@ -146,9 +146,21 @@ class ScreenCaptureService : Service() {
             captured = true
             try {
                 val bitmap = imageToBitmap(img, w, h2)
-                Log.d(TAG, "captured frame#$frameCount: ${bitmap.width}x${bitmap.height}")
-                debugSaveBitmap(bitmap)
-                CaptureCoordinator.postSuccess(bitmap)
+                val sig = bitmapSignature(bitmap)
+                val path = debugSaveBitmap(bitmap)
+                Log.d(
+                    TAG,
+                    "captured frame#$frameCount ${bitmap.width}x${bitmap.height} " +
+                        "centerPixel=0x${Integer.toHexString(sig.sampleCenter)} " +
+                        "allSameColor=${sig.isAllSameColor} savedTo=$path"
+                )
+                if (sig.isAllSameColor) {
+                    CaptureCoordinator.postError(
+                        "截到的是纯色画面（可能是黑屏 / 面板未隐藏），cap=$path"
+                    )
+                } else {
+                    CaptureCoordinator.postSuccess(bitmap)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "imageToBitmap failed", e)
                 CaptureCoordinator.postError("截屏转 Bitmap 失败：${e.message}")
@@ -173,16 +185,38 @@ class ScreenCaptureService : Service() {
         }
     }
 
-    private fun debugSaveBitmap(bitmap: Bitmap) {
-        // 仅 debug 用：把每次截图存到 cacheDir/captures，方便事后排查识别效果
-        try {
-            val dir = File(cacheDir, "captures").apply { mkdirs() }
+    private fun debugSaveBitmap(bitmap: Bitmap): String? {
+        // 存到 externalCacheDir，路径形如 /sdcard/Android/data/<pkg>/cache/captures/
+        // 用户可直接通过文件管理器或 `adb pull` 取出，无需 root
+        return try {
+            val baseDir = externalCacheDir ?: cacheDir
+            val dir = File(baseDir, "captures").apply { mkdirs() }
             val file = File(dir, "cap_${System.currentTimeMillis()}.jpg")
             FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }
             Log.d(TAG, "saved debug capture: ${file.absolutePath}")
+            file.absolutePath
         } catch (e: Exception) {
             Log.w(TAG, "saveDebugBitmap failed", e)
+            null
         }
+    }
+
+    /** 简单签名：采样几个像素点，判断是否纯色（全黑/全白） */
+    private data class BitmapSig(val isAllSameColor: Boolean, val sampleCenter: Int)
+
+    private fun bitmapSignature(bitmap: Bitmap): BitmapSig {
+        val w = bitmap.width
+        val h = bitmap.height
+        if (w < 4 || h < 4) return BitmapSig(true, 0)
+        val samples = listOf(
+            bitmap.getPixel(w / 4, h / 4),
+            bitmap.getPixel(w / 2, h / 2),
+            bitmap.getPixel(3 * w / 4, h / 2),
+            bitmap.getPixel(w / 2, 3 * h / 4),
+            bitmap.getPixel(w / 4, 3 * h / 4)
+        )
+        val allSame = samples.toSet().size == 1
+        return BitmapSig(allSame, bitmap.getPixel(w / 2, h / 2))
     }
 
     private fun imageToBitmap(img: android.media.Image, w: Int, h: Int): Bitmap {
