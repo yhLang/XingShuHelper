@@ -12,15 +12,17 @@ import com.xingshu.helper.data.model.BasketMessage
 import com.xingshu.helper.data.model.DialogMessage
 import com.xingshu.helper.data.model.DialogRole
 import com.xingshu.helper.data.model.GeneratedResult
-import com.xingshu.helper.data.model.GenerateMode
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.data.model.QAItem
 import com.xingshu.helper.data.model.RagMatch
+import com.xingshu.helper.data.model.Snippet
 import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
 import com.xingshu.helper.data.repository.EmbeddingRepository
+import com.xingshu.helper.data.repository.LocalGoldStore
 import com.xingshu.helper.data.repository.QACorpusLoader
+import com.xingshu.helper.data.repository.SnippetRepository
 import com.xingshu.helper.data.repository.VectorStore
 import com.xingshu.helper.data.repository.VisionRepository
 import com.xingshu.helper.service.CaptureCoordinator
@@ -45,8 +47,34 @@ data class PanelUiState(
     val corpusReady: Boolean = false,
     /** 上一次生成时检索到的参考话术（按相似度降序），用于结果页"参考来源"展示。 */
     val referencedQas: List<ReferencedQa> = emptyList(),
-    val generateMode: GenerateMode = GenerateMode.RAG_PLUS_AI,
+    /** 当前账号的常用片段（不走 RAG，静态加载）。 */
+    val snippets: List<Snippet> = emptyList(),
+    /** 上一次生成请求的输入，用于结果页"结合 AI 重跑"按钮。 */
+    val lastQuery: LastQuery? = null,
+    /** 添加金标 QA 流程的状态。 */
+    val addGold: AddGoldState = AddGoldState(),
 )
+
+/** 添加金标 QA 表单状态。 */
+data class AddGoldState(
+    val scene: String = "",
+    val answer: String = "",
+    val riskNote: String = "",
+    /** AI 反推出的 Q 候选，用户可编辑/删除。 */
+    val questionDrafts: List<String> = emptyList(),
+    /** 当前正在调 LLM 生成 Q 候选 */
+    val generating: Boolean = false,
+    /** 当前正在保存到本地金标库（embedding + 持久化） */
+    val saving: Boolean = false,
+    /** 提示消息（用于错误提示等） */
+    val errorMessage: String? = null,
+)
+
+/** 暂存最近一次生成的输入，便于用户在结果页选择"结合 AI 重跑"。 */
+sealed class LastQuery {
+    data class Messages(val messages: List<String>) : LastQuery()
+    data class Dialog(val dialog: List<DialogMessage>) : LastQuery()
+}
 
 /** 一条 RAG 检索结果，带相似度分数（0-1，越大越相似）。 */
 data class ReferencedQa(val item: QAItem, val score: Float)
@@ -74,11 +102,12 @@ class PanelViewModel(
     val events: SharedFlow<PanelEvent> = _events
 
     init {
-        // 监听账号切换，每次切换都重新加载对应语料库
+        // 监听账号切换，每次切换都重新加载对应语料库 + 常用片段
         viewModelScope.launch {
             accountManager.current.collect { account ->
-                _state.update { it.copy(account = account, corpusReady = false) }
+                _state.update { it.copy(account = account, corpusReady = false, snippets = emptyList()) }
                 loadCorpus(account)
+                loadSnippets(account)
             }
         }
 
@@ -168,8 +197,119 @@ class PanelViewModel(
         }
     }
 
-    fun setGenerateMode(mode: GenerateMode) {
-        _state.update { it.copy(generateMode = mode) }
+    private suspend fun loadSnippets(account: BusinessAccount) {
+        val list = SnippetRepository(appContext).load(account)
+        _state.update { it.copy(snippets = list) }
+        android.util.Log.d("PanelViewModel", "常用片段加载完成 [${account.key}]: ${list.size} 条")
+    }
+
+    // ─── 添加金标 QA 流程 ──────────────────────────────────────────
+
+    fun updateGoldScene(text: String) {
+        _state.update { it.copy(addGold = it.addGold.copy(scene = text, errorMessage = null)) }
+    }
+
+    fun updateGoldAnswer(text: String) {
+        _state.update { it.copy(addGold = it.addGold.copy(answer = text, errorMessage = null)) }
+    }
+
+    fun updateGoldRiskNote(text: String) {
+        _state.update { it.copy(addGold = it.addGold.copy(riskNote = text)) }
+    }
+
+    fun updateGoldDraft(index: Int, text: String) {
+        _state.update { st ->
+            val list = st.addGold.questionDrafts.toMutableList()
+            if (index in list.indices) list[index] = text
+            st.copy(addGold = st.addGold.copy(questionDrafts = list))
+        }
+    }
+
+    fun removeGoldDraft(index: Int) {
+        _state.update { st ->
+            val list = st.addGold.questionDrafts.toMutableList()
+            if (index in list.indices) list.removeAt(index)
+            st.copy(addGold = st.addGold.copy(questionDrafts = list))
+        }
+    }
+
+    fun addGoldDraftBlank() {
+        _state.update { st -> st.copy(addGold = st.addGold.copy(questionDrafts = st.addGold.questionDrafts + "")) }
+    }
+
+    fun resetGoldForm() {
+        _state.update { it.copy(addGold = AddGoldState()) }
+    }
+
+    /** 让 LLM 根据当前表单的 scene+answer 反推 Q 变体，写入 questionDrafts。 */
+    fun generateGoldQuestionVariants() {
+        val current = _state.value.addGold
+        if (current.answer.isBlank()) {
+            _state.update { it.copy(addGold = it.addGold.copy(errorMessage = "请先填写标准回复")) }
+            return
+        }
+        _state.update { it.copy(addGold = it.addGold.copy(generating = true, errorMessage = null)) }
+        viewModelScope.launch {
+            val list = aiRepository.generateQuestionVariants(
+                scene = current.scene,
+                answer = current.answer,
+                apiKey = AppConfig.API_KEY,
+                baseUrl = AppConfig.API_BASE_URL,
+            )
+            _state.update { st ->
+                st.copy(addGold = st.addGold.copy(
+                    generating = false,
+                    questionDrafts = list,
+                    errorMessage = if (list.isEmpty()) "AI 未返回结果，请检查网络或重试" else null,
+                ))
+            }
+        }
+    }
+
+    /** 把当前表单的 (Q1..Qn, A) 写入本地金标库，立即生效到 VectorStore。 */
+    fun saveGoldToLocal() {
+        val current = _state.value.addGold
+        val account = _state.value.account
+        val cleanQs = current.questionDrafts.map { it.trim() }.filter { it.isNotEmpty() }
+        if (current.answer.isBlank()) {
+            _state.update { it.copy(addGold = it.addGold.copy(errorMessage = "请先填写标准回复")) }
+            return
+        }
+        if (cleanQs.isEmpty()) {
+            _state.update { it.copy(addGold = it.addGold.copy(errorMessage = "至少需要一个 Q 变体（请生成或手动添加）")) }
+            return
+        }
+        _state.update { it.copy(addGold = it.addGold.copy(saving = true, errorMessage = null)) }
+        viewModelScope.launch {
+            // 1) 调 embedding API 给每个 Q 取向量
+            val vecs = embeddingRepository.embedBatch(cleanQs, AppConfig.API_KEY, AppConfig.API_BASE_URL)
+            if (vecs == null || vecs.size != cleanQs.size) {
+                _state.update { it.copy(addGold = it.addGold.copy(saving = false, errorMessage = "Embedding 失败，请检查网络")) }
+                return@launch
+            }
+            // 2) 构造条目（每个 Q 一条 QAItem，共享同 answer）
+            val sceneFinal = current.scene.ifBlank { "其他" }
+            val entries = cleanQs.zip(vecs).map { (q, vec) ->
+                com.xingshu.helper.data.model.QAItem(
+                    scene = sceneFinal,
+                    questions = listOf(q),
+                    answer = current.answer,
+                    riskNote = current.riskNote,
+                    isGold = true,
+                ) to vec
+            }
+            // 3) 持久化 + 立刻 push 到 VectorStore
+            LocalGoldStore(appContext).append(account, entries)
+            vectorStore.appendEntries(entries)
+
+            _state.update { st ->
+                st.copy(
+                    addGold = AddGoldState(),
+                    currentScreen = PanelScreen.MAIN,
+                    snackbar = "已加入金标库（${cleanQs.size} 条 Q），立即生效",
+                )
+            }
+        }
     }
 
     fun switchAccount(account: BusinessAccount) {
@@ -270,32 +410,38 @@ class PanelViewModel(
         doGenerate(messages)
     }
 
+    /** 默认入口：直接 RAG 匹配，不调 LLM。结果页上若用户不满意可点"结合 AI"按钮再走 generateWithAi()。 */
     private fun doGenerate(messages: List<String>) {
+        _state.update { it.copy(lastQuery = LastQuery.Messages(messages)) }
         viewModelScope.launch {
-            val query = messages.joinToString("\n")
-            if (_state.value.generateMode == GenerateMode.RAG_ONLY) {
-                doRagOnly(query)
-                return@launch
-            }
-            val contextItems = retrieveContext(query)
-            aiRepository.generate(messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems)
-                .collect { collectGenerateState(it) }
+            doRagOnly(messages.joinToString("\n"))
         }
     }
 
     private fun doGenerateFromDialog(dialog: List<DialogMessage>) {
+        _state.update { it.copy(lastQuery = LastQuery.Dialog(dialog)) }
         viewModelScope.launch {
             // 检索时只用客户那边的话，否则会把"我"的旧回复混进 RAG query 影响相似度
             val customerOnly = dialog.filter { it.role == DialogRole.CUSTOMER }
                 .joinToString("\n") { it.text }
-            if (_state.value.generateMode == GenerateMode.RAG_ONLY) {
-                doRagOnly(customerOnly)
-                return@launch
+            doRagOnly(customerOnly)
+        }
+    }
+
+    /** 结果页"结合 AI"按钮触发：复用刚才已检索好的 RAG 上下文（不再调 embedding API），调 LLM 生成三版回复。 */
+    fun generateWithAi() {
+        val query = _state.value.lastQuery ?: return
+        // 直接复用 state.referencedQas 里的 RAG 命中，省去再次 embedding 查询
+        val contextItems = _state.value.referencedQas.map { it.item }
+        viewModelScope.launch {
+            when (query) {
+                is LastQuery.Messages -> aiRepository.generate(
+                    query.messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
+                ).collect { collectGenerateState(it) }
+                is LastQuery.Dialog -> aiRepository.generateFromDialog(
+                    query.dialog, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
+                ).collect { collectGenerateState(it) }
             }
-            val contextItems = retrieveContext(customerOnly)
-            aiRepository.generateFromDialog(
-                dialog, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
-            ).collect { collectGenerateState(it) }
         }
     }
 

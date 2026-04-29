@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
@@ -24,13 +26,14 @@ import androidx.compose.ui.unit.sp
 import com.xingshu.helper.data.model.BasketMessage
 import com.xingshu.helper.data.model.DialogMessage
 import com.xingshu.helper.data.model.DialogRole
-import com.xingshu.helper.data.model.GenerateMode
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.service.CaptureCoordinator
+import com.xingshu.helper.ui.addgold.AddGoldContent
 import com.xingshu.helper.ui.result.ResultContent
 import com.xingshu.helper.ui.settings.SettingsContent
+import com.xingshu.helper.ui.snippets.SnippetsContent
 import com.xingshu.helper.ui.theme.XingShuTheme
 
 @Composable
@@ -53,10 +56,14 @@ fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
                         PanelScreen.MAIN -> "行恕客服助手"
                         PanelScreen.RESULT -> "生成结果"
                         PanelScreen.SETTINGS -> "设置"
+                        PanelScreen.SNIPPETS -> "常用片段"
+                        PanelScreen.ADD_GOLD -> "添加金标"
                     },
                     currentScreen = state.currentScreen,
                     onClose = onClose,
                     onSettings = { viewModel.navigateTo(PanelScreen.SETTINGS) },
+                    onSnippets = { viewModel.navigateTo(PanelScreen.SNIPPETS) },
+                    onAddGold = { viewModel.navigateTo(PanelScreen.ADD_GOLD) },
                     onBack = { viewModel.navigateTo(PanelScreen.MAIN) }
                 )
 
@@ -68,6 +75,8 @@ fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
                         corpusReady = state.corpusReady,
                         onSwitchAccount = { viewModel.switchAccount(it) }
                     )
+                    PanelScreen.SNIPPETS -> SnippetsContent(snippets = state.snippets)
+                    PanelScreen.ADD_GOLD -> AddGoldContent(state = state.addGold, viewModel = viewModel)
                 }
 
                 state.snackbar?.let { msg ->
@@ -97,6 +106,8 @@ private fun PanelTopBar(
     currentScreen: PanelScreen,
     onClose: () -> Unit,
     onSettings: () -> Unit,
+    onSnippets: () -> Unit,
+    onAddGold: () -> Unit,
     onBack: () -> Unit
 ) {
     Row(
@@ -117,6 +128,12 @@ private fun PanelTopBar(
             fontSize = 17.sp
         )
         if (currentScreen == PanelScreen.MAIN) {
+            IconButton(onClick = onAddGold) {
+                Icon(Icons.Default.Add, contentDescription = "添加金标", modifier = Modifier.size(20.dp))
+            }
+            IconButton(onClick = onSnippets) {
+                Icon(Icons.Default.Bookmark, contentDescription = "常用片段", modifier = Modifier.size(20.dp))
+            }
             IconButton(onClick = onSettings) {
                 Icon(Icons.Default.Settings, contentDescription = "设置", modifier = Modifier.size(20.dp))
             }
@@ -312,35 +329,13 @@ private fun ActionButtons(state: PanelUiState, viewModel: PanelViewModel, isLoad
         Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                val loadingText = if (state.generateMode == GenerateMode.RAG_ONLY) "正在检索相似问题…" else "正在生成回复…"
-                Text(loadingText, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("正在检索相似问题…", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         return
     }
 
-    // dialog 模式下，"加入本轮 / 单条生成" 这两个剪贴板按钮不再有意义 —— 隐藏掉
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // RAG 模式选择
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val ragOnlySelected = state.generateMode == GenerateMode.RAG_ONLY
-            OutlinedButton(
-                onClick = { viewModel.setGenerateMode(GenerateMode.RAG_ONLY) },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = if (ragOnlySelected) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surface
-                )
-            ) { Text("直接匹配", fontSize = 12.sp) }
-            OutlinedButton(
-                onClick = { viewModel.setGenerateMode(GenerateMode.RAG_PLUS_AI) },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = if (!ragOnlySelected) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surface
-                )
-            ) { Text("RAG + AI", fontSize = 12.sp) }
-        }
         if (!hasDialog) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(

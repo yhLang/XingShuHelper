@@ -8,6 +8,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -24,7 +26,13 @@ class QACorpusLoader(private val context: Context) {
                 "文本条数 ${items.size} 与向量条数 ${vecs.size} 不一致（账号 ${account.key}），请重新导出语料库"
             )
         }
-        items.zip(vecs)
+        val assetEntries = items.zip(vecs)
+        // 合并用户在 App 内添加的本地金标
+        val localGold = LocalGoldStore(context).load(account)
+        if (localGold.isNotEmpty()) {
+            android.util.Log.d("QACorpusLoader", "合并本地金标 [${account.key}]: ${localGold.size} 条")
+        }
+        assetEntries + localGold
     }
 
     private fun loadTexts(account: BusinessAccount): List<QAItem> {
@@ -38,6 +46,7 @@ class QACorpusLoader(private val context: Context) {
                 questions = listOf(obj["question"]?.jsonPrimitive?.content ?: ""),
                 answer = obj["answer"]?.jsonPrimitive?.content ?: "",
                 riskNote = obj["risk_note"]?.jsonPrimitive?.content ?: "",
+                isGold = obj["is_gold"]?.jsonPrimitive?.booleanOrNull ?: false,
             )
         }
     }
