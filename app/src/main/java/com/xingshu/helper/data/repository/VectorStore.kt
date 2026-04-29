@@ -77,7 +77,7 @@ class VectorStore {
         private const val GOLD_BOOST = 0.05f
 
         /** 最低相似度阈值。低于此视为"语料库未覆盖"，不返回噪声结果。 */
-        private const val MIN_SCORE = 0.38f
+        private const val MIN_SCORE = 0.75f
     }
 
     /**
