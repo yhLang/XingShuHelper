@@ -377,8 +377,11 @@ private fun RagMatchCard(
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    IconButton(onClick = { editing = true }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(16.dp))
+                    // 仅本地/金标 QA 可编辑：assets 原版编辑后无处持久化
+                    if (sourceItem.isLocal || match.isGold) {
+                        IconButton(onClick = { editing = true }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(16.dp))
+                        }
                     }
                 }
                 FilledTonalButton(
