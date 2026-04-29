@@ -23,7 +23,8 @@ data class QAItem(
 data class RagMatch(
     val scene: String,
     val answer: String,
-    val score: Float
+    val score: Float,
+    val isGold: Boolean = false,
 )
 
 data class GeneratedResult(

@@ -34,6 +34,12 @@ class LocalGoldStore(private val context: Context) {
         return File(dir, "${account.key}.jsonl")
     }
 
+    /** 用户取消金标的 question 列表（一行一个，纯文本，UTF-8）。 */
+    private fun demotedFile(account: BusinessAccount): File {
+        val dir = File(context.filesDir, "local_gold").apply { mkdirs() }
+        return File(dir, "${account.key}.demoted.txt")
+    }
+
     suspend fun load(account: BusinessAccount): List<Pair<QAItem, FloatArray>> = withContext(Dispatchers.IO) {
         val f = file(account)
         if (!f.exists()) return@withContext emptyList()
@@ -127,5 +133,95 @@ class LocalGoldStore(private val context: Context) {
         }.toString()
 
         f.writeText((keep + newLine).joinToString("\n", postfix = "\n"))
+    }
+
+    /**
+     * 把一条非金标 QA 升级为金标：复制原 item（answer/risk_note 不变）写入本地金标 jsonl。
+     * 同 question 已存在则跳过（避免重复）。同时清掉 demoted 中的同 question 记录。
+     */
+    suspend fun promote(
+        account: BusinessAccount,
+        question: String,
+        scene: String,
+        answer: String,
+        riskNote: String,
+        embedding: FloatArray,
+    ) = withContext(Dispatchers.IO) {
+        val targetQ = question.trim()
+        if (targetQ.isEmpty()) return@withContext
+        removeDemoted(account, targetQ)
+
+        val f = file(account)
+        val exists = f.exists() && f.useLines { lines ->
+            lines.any { line ->
+                val q = runCatching {
+                    ((json.parseToJsonElement(line.trim()) as? JsonObject)
+                        ?.get("question") as? JsonPrimitive)?.content
+                }.getOrNull()
+                q == targetQ
+            }
+        }
+        if (exists) return@withContext
+
+        val newLine = buildJsonObject {
+            put("scene", scene)
+            put("question", targetQ)
+            put("answer", answer)
+            put("risk_note", riskNote)
+            putJsonArray("embedding") {
+                embedding.forEach { add(JsonPrimitive(it)) }
+            }
+        }.toString()
+        f.appendText(newLine + "\n")
+    }
+
+    /** 读取被用户降级（取消金标）的 question 集合。 */
+    suspend fun loadDemoted(account: BusinessAccount): Set<String> = withContext(Dispatchers.IO) {
+        val f = demotedFile(account)
+        if (!f.exists()) emptySet()
+        else f.useLines { lines ->
+            lines.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        }
+    }
+
+    /**
+     * 把某个 question 标记为「已取消金标」。
+     * 副作用：如果本地金标 jsonl 里有同 question 的条目，一并删除（保持 store 干净）。
+     */
+    suspend fun addDemoted(account: BusinessAccount, question: String) = withContext(Dispatchers.IO) {
+        val q = question.trim()
+        if (q.isEmpty()) return@withContext
+
+        val df = demotedFile(account)
+        val existing = if (df.exists()) df.useLines { it.map(String::trim).filter(String::isNotEmpty).toSet() } else emptySet()
+        if (q !in existing) df.appendText(q + "\n")
+
+        val f = file(account)
+        if (f.exists()) {
+            val keep = f.useLines { lines ->
+                lines.mapNotNull { line ->
+                    val trimmed = line.trim()
+                    if (trimmed.isEmpty()) return@mapNotNull null
+                    val lq = runCatching {
+                        ((json.parseToJsonElement(trimmed) as? JsonObject)
+                            ?.get("question") as? JsonPrimitive)?.content
+                    }.getOrNull()
+                    if (lq == q) null else trimmed
+                }.toList()
+            }
+            f.writeText(if (keep.isEmpty()) "" else keep.joinToString("\n", postfix = "\n"))
+        }
+    }
+
+    /** 移除某个 question 的降级标记（重新可被金标 boost）。 */
+    suspend fun removeDemoted(account: BusinessAccount, question: String) = withContext(Dispatchers.IO) {
+        val q = question.trim()
+        if (q.isEmpty()) return@withContext
+        val df = demotedFile(account)
+        if (!df.exists()) return@withContext
+        val keep = df.useLines { lines ->
+            lines.map { it.trim() }.filter { it.isNotEmpty() && it != q }.toList()
+        }
+        df.writeText(if (keep.isEmpty()) "" else keep.joinToString("\n", postfix = "\n"))
     }
 }

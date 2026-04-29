@@ -26,11 +26,20 @@ class QACorpusLoader(private val context: Context) {
                 "文本条数 ${items.size} 与向量条数 ${vecs.size} 不一致（账号 ${account.key}），请重新导出语料库"
             )
         }
-        val assetEntries = items.zip(vecs)
+        val store = LocalGoldStore(context)
+        val demoted = store.loadDemoted(account)
+        // assets 是只读的，因此「降级」只能在加载阶段把 isGold 强制翻 false
+        val assetEntries = items.zip(vecs).map { (item, vec) ->
+            val q = item.questions.firstOrNull().orEmpty()
+            if (item.isGold && q in demoted) item.copy(isGold = false) to vec else item to vec
+        }
         // 合并用户在 App 内添加的本地金标
-        val localGold = LocalGoldStore(context).load(account)
+        val localGold = store.load(account)
         if (localGold.isNotEmpty()) {
             android.util.Log.d("QACorpusLoader", "合并本地金标 [${account.key}]: ${localGold.size} 条")
+        }
+        if (demoted.isNotEmpty()) {
+            android.util.Log.d("QACorpusLoader", "应用金标降级 [${account.key}]: ${demoted.size} 条")
         }
         assetEntries + localGold
     }

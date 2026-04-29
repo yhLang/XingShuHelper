@@ -41,6 +41,20 @@ class VectorStore {
     fun vectorForQuestion(question: String): FloatArray? =
         entries.firstOrNull { (item, _) -> item.questions.firstOrNull() == question }?.second
 
+    /** 找回 question 对应的 QAItem。用于升级金标时拿到原条目（assets 来源不可写但可读）。 */
+    fun itemForQuestion(question: String): QAItem? =
+        entries.firstOrNull { (item, _) -> item.questions.firstOrNull() == question }?.first
+
+    /** 内存里翻转 question 对应条目的 isGold 标志，立刻影响后续 search 排序，无需重 load corpus。 */
+    fun setGoldByQuestion(question: String, isGold: Boolean) {
+        val updated = entries.map { (item, vec) ->
+            if (item.questions.firstOrNull() == question && item.isGold != isGold) {
+                item.copy(isGold = isGold) to vec
+            } else item to vec
+        }
+        entries = updated
+    }
+
     fun search(query: FloatArray, topK: Int = 5): List<Pair<QAItem, Float>> {
         val snapshot = entries
         if (snapshot.isEmpty()) return emptyList()

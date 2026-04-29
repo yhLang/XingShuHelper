@@ -371,6 +371,104 @@ class PanelViewModel(
         }
     }
 
+    /**
+     * 将 RAG 结果中的某条 QA 升级为金标：写入本地金标库（assets 来源条目会被复制一份），
+     * 内存里翻转 isGold 标志，UI 立即把这条置顶到第一位并打金标角标。
+     * 如果之前被用户取消过金标（在 demoted 列表里），仅清掉 demoted 标记即可。
+     */
+    fun promoteToGold(item: QAItem) {
+        val account = _state.value.account
+        val question = item.questions.firstOrNull().orEmpty()
+        if (question.isBlank()) {
+            showSnackbar("无法识别该条目的 question")
+            return
+        }
+        val vec = vectorStore.vectorForQuestion(question)
+        if (vec == null) {
+            showSnackbar("找不到原向量，无法升级金标")
+            return
+        }
+        viewModelScope.launch {
+            val store = LocalGoldStore(appContext)
+            val demoted = store.loadDemoted(account)
+            if (question in demoted) {
+                // 之前被降级过，撤销即可恢复金标 boost
+                store.removeDemoted(account, question)
+            } else if (!item.isLocal) {
+                // assets 非金标条目，复制一份到本地金标 store
+                store.promote(
+                    account = account,
+                    question = question,
+                    scene = item.scene,
+                    answer = item.answer,
+                    riskNote = item.riskNote,
+                    embedding = vec,
+                )
+            }
+            vectorStore.setGoldByQuestion(question, true)
+            applyGoldFlagToState(question, true)
+            showSnackbar("已设为金标，已置顶并下次检索继续生效")
+        }
+    }
+
+    /**
+     * 将某条 QA 取消金标：写入 demoted 列表（同时清掉本地金标 store 里的对应行），
+     * VectorStore 内存中 isGold 翻 false，UI 移除该条的角标和置顶。
+     */
+    fun demoteFromGold(item: QAItem) {
+        val account = _state.value.account
+        val question = item.questions.firstOrNull().orEmpty()
+        if (question.isBlank()) {
+            showSnackbar("无法识别该条目的 question")
+            return
+        }
+        viewModelScope.launch {
+            LocalGoldStore(appContext).addDemoted(account, question)
+            vectorStore.setGoldByQuestion(question, false)
+            applyGoldFlagToState(question, false)
+            showSnackbar("已取消金标")
+        }
+    }
+
+    /**
+     * 翻转 state 中 question 对应条目的 isGold 标志：
+     * - RAG-only 结果页（ragMatches 与 referencedQas 索引对齐）：同步两边、稳定排序金标置顶。
+     * - 其它情况：只更新 referencedQas，避免动 ragMatches 索引。
+     */
+    private fun applyGoldFlagToState(question: String, isGold: Boolean) {
+        _state.update { st ->
+            val cur = st.generateState
+            if (cur is GenerateState.Success
+                && cur.result.isDirectMatch
+                && st.referencedQas.size == cur.result.ragMatches.size
+            ) {
+                val zipped = cur.result.ragMatches.zip(st.referencedQas).map { (rm, ref) ->
+                    val q = ref.item.questions.firstOrNull()
+                    if (q == question) {
+                        rm.copy(isGold = isGold) to ref.copy(item = ref.item.copy(isGold = isGold))
+                    } else rm to ref
+                }
+                val sorted = zipped.withIndex().sortedWith(
+                    compareByDescending<IndexedValue<Pair<RagMatch, ReferencedQa>>> { it.value.first.isGold }
+                        .thenBy { it.index }
+                ).map { it.value }
+                st.copy(
+                    generateState = GenerateState.Success(
+                        cur.result.copy(ragMatches = sorted.map { it.first })
+                    ),
+                    referencedQas = sorted.map { it.second },
+                )
+            } else {
+                val newRefs = st.referencedQas.map { ref ->
+                    if (ref.item.questions.firstOrNull() == question) {
+                        ref.copy(item = ref.item.copy(isGold = isGold))
+                    } else ref
+                }
+                st.copy(referencedQas = newRefs)
+            }
+        }
+    }
+
     fun switchAccount(account: BusinessAccount) {
         if (account == accountManager.current.value) return
         accountManager.set(account)
@@ -512,7 +610,7 @@ class PanelViewModel(
             return
         }
         val ragMatches = matches.map { (item, score) ->
-            RagMatch(scene = item.scene, answer = item.answer, score = score)
+            RagMatch(scene = item.scene, answer = item.answer, score = score, isGold = item.isGold)
         }
         collectGenerateState(GenerateState.Success(GeneratedResult(isDirectMatch = true, ragMatches = ragMatches)))
     }
