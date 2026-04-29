@@ -72,6 +72,7 @@ class VectorStore {
     }
 
     private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
+        if (a.size != b.size) return 0f
         var dot = 0.0
         var normA = 0.0
         var normB = 0.0

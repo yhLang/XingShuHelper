@@ -52,6 +52,7 @@ class VisionRepository {
 
         val resized = downscale(bitmap, MAX_LONG_EDGE)
         val dataUrl = "data:image/jpeg;base64,${encodeJpegBase64(resized, JPEG_QUALITY)}"
+        if (resized !== bitmap) resized.recycle()
 
         val body = buildJsonObject {
             put("model", AppConfig.VISION_MODEL)
