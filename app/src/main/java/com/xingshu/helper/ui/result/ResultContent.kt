@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
@@ -429,6 +430,7 @@ private fun InlineEditAnswer(
 ) {
     var answer by remember(initialAnswer) { mutableStateOf(initialAnswer) }
     var riskNote by remember(initialRiskNote) { mutableStateOf(initialRiskNote) }
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -438,11 +440,35 @@ private fun InlineEditAnswer(
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            "修订：[$scene] $question",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "修订：[$scene] $question",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(
+                onClick = { answer = (answer + readClipboardText(context)) },
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                modifier = Modifier.height(28.dp)
+            ) {
+                Icon(Icons.Filled.ContentPaste, contentDescription = "粘贴到回复", modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("粘贴回复", fontSize = 11.sp)
+            }
+            TextButton(
+                onClick = { riskNote = (riskNote + readClipboardText(context)) },
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                modifier = Modifier.height(28.dp)
+            ) {
+                Icon(Icons.Filled.ContentPaste, contentDescription = "粘贴到风险", modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("粘贴风险", fontSize = 11.sp)
+            }
+        }
         OutlinedTextField(
             value = answer,
             onValueChange = { answer = it },
@@ -485,6 +511,13 @@ private fun InlineEditAnswer(
 private fun copyText(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("reply", text))
+}
+
+private fun readClipboardText(context: Context): String {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clip = clipboard.primaryClip ?: return ""
+    if (clip.itemCount == 0) return ""
+    return clip.getItemAt(0).coerceToText(context)?.toString().orEmpty()
 }
 
 @Composable
