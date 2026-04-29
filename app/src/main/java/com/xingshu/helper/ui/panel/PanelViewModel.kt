@@ -11,13 +11,18 @@ import com.xingshu.helper.data.account.BusinessAccount
 import com.xingshu.helper.data.model.BasketMessage
 import com.xingshu.helper.data.model.DialogMessage
 import com.xingshu.helper.data.model.DialogRole
+import com.xingshu.helper.data.model.GeneratedResult
+import com.xingshu.helper.data.model.GenerateMode
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.data.model.QAItem
+import com.xingshu.helper.data.model.RagMatch
+import com.xingshu.helper.data.model.Snippet
 import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
 import com.xingshu.helper.data.repository.EmbeddingRepository
 import com.xingshu.helper.data.repository.QACorpusLoader
+import com.xingshu.helper.data.repository.SnippetRepository
 import com.xingshu.helper.data.repository.VectorStore
 import com.xingshu.helper.data.repository.VisionRepository
 import com.xingshu.helper.service.CaptureCoordinator
@@ -42,6 +47,9 @@ data class PanelUiState(
     val corpusReady: Boolean = false,
     /** 上一次生成时检索到的参考话术（按相似度降序），用于结果页"参考来源"展示。 */
     val referencedQas: List<ReferencedQa> = emptyList(),
+    val generateMode: GenerateMode = GenerateMode.RAG_PLUS_AI,
+    /** 当前账号的常用片段（不走 RAG，静态加载）。 */
+    val snippets: List<Snippet> = emptyList(),
 )
 
 /** 一条 RAG 检索结果，带相似度分数（0-1，越大越相似）。 */
@@ -70,11 +78,12 @@ class PanelViewModel(
     val events: SharedFlow<PanelEvent> = _events
 
     init {
-        // 监听账号切换，每次切换都重新加载对应语料库
+        // 监听账号切换，每次切换都重新加载对应语料库 + 常用片段
         viewModelScope.launch {
             accountManager.current.collect { account ->
-                _state.update { it.copy(account = account, corpusReady = false) }
+                _state.update { it.copy(account = account, corpusReady = false, snippets = emptyList()) }
                 loadCorpus(account)
+                loadSnippets(account)
             }
         }
 
@@ -162,6 +171,16 @@ class PanelViewModel(
             _state.update { it.copy(corpusReady = false) }
             android.util.Log.e("PanelViewModel", "RAG 语料库加载失败 [${account.key}]: ${e.message}")
         }
+    }
+
+    private suspend fun loadSnippets(account: BusinessAccount) {
+        val list = SnippetRepository(appContext).load(account)
+        _state.update { it.copy(snippets = list) }
+        android.util.Log.d("PanelViewModel", "常用片段加载完成 [${account.key}]: ${list.size} 条")
+    }
+
+    fun setGenerateMode(mode: GenerateMode) {
+        _state.update { it.copy(generateMode = mode) }
     }
 
     fun switchAccount(account: BusinessAccount) {
@@ -264,7 +283,12 @@ class PanelViewModel(
 
     private fun doGenerate(messages: List<String>) {
         viewModelScope.launch {
-            val contextItems = retrieveContext(messages.joinToString("\n"))
+            val query = messages.joinToString("\n")
+            if (_state.value.generateMode == GenerateMode.RAG_ONLY) {
+                doRagOnly(query)
+                return@launch
+            }
+            val contextItems = retrieveContext(query)
             aiRepository.generate(messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems)
                 .collect { collectGenerateState(it) }
         }
@@ -275,6 +299,10 @@ class PanelViewModel(
             // 检索时只用客户那边的话，否则会把"我"的旧回复混进 RAG query 影响相似度
             val customerOnly = dialog.filter { it.role == DialogRole.CUSTOMER }
                 .joinToString("\n") { it.text }
+            if (_state.value.generateMode == GenerateMode.RAG_ONLY) {
+                doRagOnly(customerOnly)
+                return@launch
+            }
             val contextItems = retrieveContext(customerOnly)
             aiRepository.generateFromDialog(
                 dialog, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
@@ -282,7 +310,20 @@ class PanelViewModel(
         }
     }
 
-    private suspend fun retrieveContext(query: String): List<QAItem> {
+    private suspend fun doRagOnly(query: String) {
+        _state.update { it.copy(generateState = GenerateState.Loading) }
+        val matches = retrieveContextWithScores(query)
+        if (matches.isEmpty()) {
+            collectGenerateState(GenerateState.Error("未找到匹配的历史回答，请检查语料库是否加载"))
+            return
+        }
+        val ragMatches = matches.map { (item, score) ->
+            RagMatch(scene = item.scene, answer = item.answer, score = score)
+        }
+        collectGenerateState(GenerateState.Success(GeneratedResult(isDirectMatch = true, ragMatches = ragMatches)))
+    }
+
+    private suspend fun retrieveContextWithScores(query: String): List<Pair<QAItem, Float>> {
         if (!vectorStore.isReady || query.isBlank()) {
             _state.update { it.copy(referencedQas = emptyList()) }
             return emptyList()
@@ -293,9 +334,13 @@ class PanelViewModel(
             return emptyList()
         }
         val hits = vectorStore.search(queryVec, topK = 5)
-        // 把检索结果（带分数）写入 state，UI 在结果页展示
+        // 把检索结果（带分数）写入 state，RAG+AI 模式下结果页展示「参考话术」面板
         _state.update { it.copy(referencedQas = hits.map { (item, score) -> ReferencedQa(item, score) }) }
-        return hits.map { (item, _) -> item }
+        return hits
+    }
+
+    private suspend fun retrieveContext(query: String): List<QAItem> {
+        return retrieveContextWithScores(query).map { (item, _) -> item }
     }
 
     private fun collectGenerateState(state: GenerateState) {

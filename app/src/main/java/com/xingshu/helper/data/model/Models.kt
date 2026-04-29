@@ -46,7 +46,14 @@ sealed class GenerateState {
     data class Error(val message: String) : GenerateState()
 }
 
-enum class PanelScreen { MAIN, RESULT, SETTINGS }
+enum class PanelScreen { MAIN, RESULT, SETTINGS, SNIPPETS }
+
+/** 常用片段：客服可一键复制的标准措辞，不走 RAG，直接静态加载。 */
+data class Snippet(
+    val category: String,
+    val title: String,
+    val text: String,
+)
 
 enum class DialogRole { CUSTOMER, ME }
 
