@@ -20,6 +20,7 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.xingshu.helper.R
 import java.io.File
 import java.io.FileOutputStream
 
@@ -43,10 +44,11 @@ class ScreenCaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
-    // 是否有"待响应的截屏请求"。listener 持续收到帧，没请求时 drain 丢弃，
-    // 有请求时取下一帧返回
-    @Volatile private var pendingCapture: Boolean = false
-    @Volatile private var skipFramesRemaining: Int = 0
+    // 始终缓存最近一帧的 bitmap。屏幕静止时 VirtualDisplay 不出新帧，
+    // 之前"drain + 等待"策略会拿不到任何 image → 改为永远持有最新一帧，
+    // 截屏请求时直接用 latestFrame 即可
+    @Volatile private var latestFrame: Bitmap? = null
+    private val frameLock = Any()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -147,42 +149,17 @@ class ScreenCaptureService : Service() {
         val reader = ImageReader.newInstance(w, h2, PixelFormat.RGBA_8888, 3)
         reader.setOnImageAvailableListener({ r ->
             val img = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-            // 不在响应窗口内：丢弃帧（必须 close 否则 buffer 锁死）
-            if (!pendingCapture) {
-                img.close()
-                return@setOnImageAvailableListener
-            }
-            // 在响应窗口：先消耗"跳过"配额（VirtualDisplay 刚建/或刚收到隐藏面板事件后头一两帧可能是过渡帧）
-            if (skipFramesRemaining > 0) {
-                skipFramesRemaining--
-                img.close()
-                return@setOnImageAvailableListener
-            }
-            // 真正处理：拿这一帧、置标志位、释放等待下次
-            pendingCapture = false
             try {
                 val bitmap = imageToBitmap(img, w, h2)
-                val sig = bitmapSignature(bitmap)
-                val path = debugSaveBitmap(bitmap)
-                Log.d(
-                    TAG,
-                    "captured ${bitmap.width}x${bitmap.height} " +
-                        "centerPixel=0x${Integer.toHexString(sig.sampleCenter)} " +
-                        "allSameColor=${sig.isAllSameColor} savedTo=$path"
-                )
-                if (sig.isAllSameColor) {
-                    CaptureCoordinator.postError(
-                        "截到的是纯色画面（可能是黑屏 / 面板未隐藏），cap=$path"
-                    )
-                } else {
-                    CaptureCoordinator.postSuccess(bitmap)
+                synchronized(frameLock) {
+                    val old = latestFrame
+                    latestFrame = bitmap
+                    old?.recycle()
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "imageToBitmap failed", e)
-                CaptureCoordinator.postError("截屏转 Bitmap 失败：${e.message}")
+                Log.w(TAG, "frame -> bitmap failed: ${e.message}")
             } finally {
                 img.close()
-                CaptureCoordinator.setCapturing(false)
             }
         }, h)
 
@@ -203,39 +180,40 @@ class ScreenCaptureService : Service() {
     }
 
     /**
-     * 安排下一次截屏：等 delayMs（让面板隐藏 + 给屏幕一个稳定窗口），然后开 capture window，
-     * 跳过前 N 帧（防止过渡帧），抓下一帧返回。
+     * 安排下一次截屏：等 delayMs（让面板隐藏后 SurfaceFlinger 推一帧给 VirtualDisplay），
+     * 之后从缓存里拿最新帧返回。
+     *
+     * Why no frame waiting: 屏幕静止时 VirtualDisplay 不会推新帧，等待会超时。
+     * 但只要 VirtualDisplay 创建过，listener 至少触发过一次，latestFrame 不为 null。
+     * 面板隐藏会触发新一帧，500ms 延迟足够等 listener 把它存到 latestFrame。
      */
     private fun scheduleNextCapture(delayMs: Long, isFirstCapture: Boolean) {
         handler?.postDelayed({
-            // 跳帧策略：首次截屏（VirtualDisplay 刚建立）多跳几帧；后续直接抓
-            skipFramesRemaining = if (isFirstCapture) 1 else 0
-            pendingCapture = true
-            Log.d(TAG, "capture window opened, skipFrames=$skipFramesRemaining")
-            // 兜底：如果 5 秒内屏幕完全静止没有新帧到来，强制取一次 latest
-            handler?.postDelayed({
-                if (pendingCapture) {
-                    val img = imageReader?.acquireLatestImage()
-                    if (img != null) {
-                        Log.d(TAG, "force-grabbing static frame")
-                        // 复用 listener 路径：把 pendingCapture 留 true，listener 下次会直接处理
-                        // 这里为了简单直接处理
-                        pendingCapture = false
-                        try {
-                            val w = imageReader!!.width
-                            val h = imageReader!!.height
-                            val bitmap = imageToBitmap(img, w, h)
-                            CaptureCoordinator.postSuccess(bitmap)
-                            debugSaveBitmap(bitmap)
-                        } finally {
-                            img.close()
-                            CaptureCoordinator.setCapturing(false)
-                        }
-                    } else {
-                        postError("等待截屏帧超时")
-                    }
-                }
-            }, FORCE_GRAB_TIMEOUT_MS)
+            val bitmap = synchronized(frameLock) {
+                val b = latestFrame
+                latestFrame = null  // 取出后清空，避免下次拿到陈旧帧
+                b
+            }
+            if (bitmap == null) {
+                postError("尚未收到任何屏幕帧，请稍后重试")
+                return@postDelayed
+            }
+            val sig = bitmapSignature(bitmap)
+            val path = debugSaveBitmap(bitmap)
+            Log.d(
+                TAG,
+                "captured ${bitmap.width}x${bitmap.height} " +
+                    "centerPixel=0x${Integer.toHexString(sig.sampleCenter)} " +
+                    "allSameColor=${sig.isAllSameColor} firstCapture=$isFirstCapture savedTo=$path"
+            )
+            if (sig.isAllSameColor) {
+                CaptureCoordinator.postError(
+                    "截到的是纯色画面（可能是黑屏 / 面板未隐藏），cap=$path"
+                )
+            } else {
+                CaptureCoordinator.postSuccess(bitmap)
+            }
+            CaptureCoordinator.setCapturing(false)
         }, delayMs)
     }
 
@@ -244,7 +222,10 @@ class ScreenCaptureService : Service() {
         try { imageReader?.close() } catch (_: Exception) {}
         virtualDisplay = null
         imageReader = null
-        pendingCapture = false
+        synchronized(frameLock) {
+            latestFrame?.recycle()
+            latestFrame = null
+        }
     }
 
     private fun debugSaveBitmap(bitmap: Bitmap): String? {
@@ -327,7 +308,7 @@ class ScreenCaptureService : Service() {
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("行恕助手 · 屏幕识别就绪")
             .setContentText("已授权截屏，下次识别可直接复用，无需再次确认")
-            .setSmallIcon(android.R.drawable.ic_menu_edit)
+            .setSmallIcon(R.drawable.ic_sun_emblem)
             .setOngoing(true)
             .setSilent(true)
             .build()
@@ -337,7 +318,6 @@ class ScreenCaptureService : Service() {
         private const val CHANNEL_ID = "xingshu_capture"
         private const val NOTIFICATION_ID = 2
         private const val DEFAULT_DELAY_MS = 5_000L
-        private const val FORCE_GRAB_TIMEOUT_MS = 1_500L
 
         const val ACTION_START_AND_CAPTURE = "com.xingshu.helper.START_AND_CAPTURE"
         const val ACTION_CAPTURE_AGAIN = "com.xingshu.helper.CAPTURE_AGAIN"

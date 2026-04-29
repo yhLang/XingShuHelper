@@ -120,14 +120,13 @@ class FloatingBallService : Service(),
 
     private fun createBall() {
         ballView = makeComposeView {
-            FloatingBallView(
-                onClick = { togglePanel() }
-            )
+            FloatingBallView()
         }
 
         val params = ballLayoutParams()
         windowManager.addView(ballView, params)
 
+        ballView!!.setOnClickListener { togglePanel() }
         ballView!!.setOnTouchListener(DragTouchListener(params) { x, y ->
             ballX = x
             ballY = y
@@ -223,7 +222,7 @@ class FloatingBallService : Service(),
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(getString(R.string.notification_text))
-            .setSmallIcon(android.R.drawable.ic_menu_edit)
+            .setSmallIcon(R.drawable.ic_sun_emblem)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setSilent(true)
