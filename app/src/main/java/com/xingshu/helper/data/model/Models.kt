@@ -24,14 +24,6 @@ data class RagMatch(
     val score: Float
 )
 
-enum class GenerateMode { RAG_ONLY, RAG_PLUS_AI }
-
-data class RagMatch(
-    val scene: String,
-    val answer: String,
-    val score: Float
-)
-
 data class GeneratedResult(
     val isSensitive: Boolean = false,
     val sensitiveNote: String = "",
