@@ -56,6 +56,10 @@ class VisionRepository {
         val body = buildJsonObject {
             put("model", AppConfig.VISION_MODEL)
             put("max_tokens", 2048)
+            // temperature=0 + top_p=0.1：让模型尽量"逐字抄写"看到的内容，
+            // 而不是发挥编出经典客服对话
+            put("temperature", 0)
+            put("top_p", 0.1)
             putJsonArray("messages") {
                 add(buildJsonObject {
                     put("role", "user")
@@ -174,22 +178,25 @@ class VisionRepository {
         private const val JPEG_QUALITY = 85
 
         private val EXTRACT_PROMPT = """
-请提取这张微信聊天截图中所有可见的聊天气泡内容。
+你的任务：从这张图片中**逐字抄写**所有微信聊天气泡里的文字。
 
-规则：
-- 左侧（通常是白色或浅灰背景）的气泡是 "customer"（对方/客户发的）
-- 右侧（通常是绿色背景）的气泡是 "me"（我自己发的）
-- 严格按从上到下的顺序输出
-- 忽略：时间分隔符、"以上是历史消息"、撤回提示、系统通知、单纯的表情包/图片（无文字内容时）
-- 表情符号保留在文本中
-- 不要合并不同气泡，每个气泡一条记录
+⚠️ 极其重要的反幻觉约束：
+1. 只输出图片中**真实存在、清晰可见、可以确认**的文字
+2. 严禁编造、推测、补全、"修复"看不清的字
+3. 严禁生成"示例"客服对话（如"你好我想问一下"、"好的谢谢"、"保修多久"等）
+4. 如果图片不是微信聊天界面、或者你无法清晰辨识任何聊天文字 → 必须返回空数组 []
+5. 如果只有一两条能看清，就只输出那一两条；不要凑数
 
-只输出 JSON 数组，不要任何额外文字，不要 markdown 代码块。
-格式严格如下：
-[
-  {"role": "customer", "text": "..."},
-  {"role": "me", "text": "..."}
-]
+判断角色：
+- 左侧白/灰色气泡 = "customer"（对方）
+- 右侧绿色气泡 = "me"（我自己）
+
+忽略：时间戳、"以上是历史消息"、撤回提示、系统消息、纯表情包/贴纸（除非里面有文字）
+
+输出格式：严格的 JSON 数组，不要任何额外说明，不要 markdown 代码块：
+[{"role": "customer", "text": "原图中实际出现的文字"}, ...]
+
+如果完全识别不出 → 返回 []，不要为了响应而编造。
         """.trimIndent()
     }
 }
