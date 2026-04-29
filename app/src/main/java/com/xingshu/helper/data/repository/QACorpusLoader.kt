@@ -17,7 +17,7 @@ import java.nio.ByteOrder
 
 class QACorpusLoader(private val context: Context) {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = sharedJson
     private val sync = CorpusSyncManager(context)
 
     /** 优先用 filesDir 里的同步版（CorpusSyncManager 写入），其次回退到 APK assets。 */

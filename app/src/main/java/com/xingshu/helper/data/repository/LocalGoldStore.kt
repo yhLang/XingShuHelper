@@ -5,13 +5,11 @@ import com.xingshu.helper.data.account.BusinessAccount
 import com.xingshu.helper.data.model.QAItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.float
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -27,7 +25,7 @@ import java.io.File
  */
 class LocalGoldStore(private val context: Context) {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = sharedJson
 
     private fun file(account: BusinessAccount): File {
         val dir = File(context.filesDir, "local_gold").apply { mkdirs() }
@@ -40,28 +38,54 @@ class LocalGoldStore(private val context: Context) {
         return File(dir, "${account.key}.demoted.txt")
     }
 
+    /** 解析一行 JSONL 为 (QAItem, embedding)，失败返回 null。 */
+    private fun parseLine(line: String): Pair<QAItem, FloatArray>? {
+        val trimmed = line.trim()
+        if (trimmed.isEmpty()) return null
+        return runCatching {
+            val obj = json.parseToJsonElement(trimmed) as JsonObject
+            val item = QAItem(
+                scene = obj["scene"]?.jsonPrimitive?.content ?: "其他",
+                questions = listOf(obj["question"]?.jsonPrimitive?.content ?: ""),
+                answer = obj["answer"]?.jsonPrimitive?.content ?: "",
+                riskNote = obj["risk_note"]?.jsonPrimitive?.content ?: "",
+                isGold = true,
+                isLocal = true,
+            )
+            val vec = (obj["embedding"] as JsonArray).map { it.jsonPrimitive.float }.toFloatArray()
+            item to vec
+        }.getOrNull()
+    }
+
+    /** 只解析 question 字段（用于按 question 去重 / 查找时无需读 embedding 浪费）。 */
+    private fun parseQuestion(line: String): String? {
+        val trimmed = line.trim()
+        if (trimmed.isEmpty()) return null
+        return runCatching {
+            ((json.parseToJsonElement(trimmed) as? JsonObject)
+                ?.get("question") as? JsonPrimitive)?.content
+        }.getOrNull()
+    }
+
+    /** 把一条 (QAItem, embedding) 序列化为 JSONL 一行（不带换行）。 */
+    private fun buildLine(
+        scene: String,
+        question: String,
+        answer: String,
+        riskNote: String,
+        embedding: FloatArray,
+    ): String = buildJsonObject {
+        put("scene", scene)
+        put("question", question)
+        put("answer", answer)
+        put("risk_note", riskNote)
+        putJsonArray("embedding") { embedding.forEach { add(JsonPrimitive(it)) } }
+    }.toString()
+
     suspend fun load(account: BusinessAccount): List<Pair<QAItem, FloatArray>> = withContext(Dispatchers.IO) {
         val f = file(account)
         if (!f.exists()) return@withContext emptyList()
-        f.useLines { lines ->
-            lines.mapNotNull { line ->
-                val trimmed = line.trim()
-                if (trimmed.isEmpty()) return@mapNotNull null
-                runCatching {
-                    val obj = json.parseToJsonElement(trimmed) as JsonObject
-                    val item = QAItem(
-                        scene = obj["scene"]?.jsonPrimitive?.content ?: "其他",
-                        questions = listOf(obj["question"]?.jsonPrimitive?.content ?: ""),
-                        answer = obj["answer"]?.jsonPrimitive?.content ?: "",
-                        riskNote = obj["risk_note"]?.jsonPrimitive?.content ?: "",
-                        isGold = true,
-                        isLocal = true,
-                    )
-                    val vec = (obj["embedding"] as JsonArray).map { it.jsonPrimitive.float }.toFloatArray()
-                    item to vec
-                }.getOrNull()
-            }.toList()
-        }
+        f.useLines { lines -> lines.mapNotNull { parseLine(it) }.toList() }
     }
 
     /** 追加多条到 JSONL。每条一行，便于 grep/手工编辑。 */
@@ -70,15 +94,13 @@ class LocalGoldStore(private val context: Context) {
         val f = file(account)
         f.appendText(
             entries.joinToString("\n", postfix = "\n") { (item, vec) ->
-                buildJsonObject {
-                    put("scene", item.scene)
-                    put("question", item.questions.firstOrNull().orEmpty())
-                    put("answer", item.answer)
-                    put("risk_note", item.riskNote)
-                    putJsonArray("embedding") {
-                        vec.forEach { add(JsonPrimitive(it)) }
-                    }
-                }.toString()
+                buildLine(
+                    scene = item.scene,
+                    question = item.questions.firstOrNull().orEmpty(),
+                    answer = item.answer,
+                    riskNote = item.riskNote,
+                    embedding = vec,
+                )
             }
         )
     }
@@ -112,26 +134,14 @@ class LocalGoldStore(private val context: Context) {
             f.useLines { lines ->
                 lines.mapNotNull { line ->
                     val trimmed = line.trim()
-                    if (trimmed.isEmpty()) return@mapNotNull null
-                    val q = runCatching {
-                        ((json.parseToJsonElement(trimmed) as? JsonObject)
-                            ?.get("question") as? JsonPrimitive)?.content
-                    }.getOrNull()
-                    if (q == targetQ) null else trimmed
+                    if (trimmed.isEmpty()) null
+                    else if (parseQuestion(trimmed) == targetQ) null
+                    else trimmed
                 }.toList()
             }
         } else emptyList()
 
-        val newLine = buildJsonObject {
-            put("scene", scene)
-            put("question", targetQ)
-            put("answer", answer)
-            put("risk_note", riskNote)
-            putJsonArray("embedding") {
-                embedding.forEach { add(JsonPrimitive(it)) }
-            }
-        }.toString()
-
+        val newLine = buildLine(scene, targetQ, answer, riskNote, embedding)
         f.writeText((keep + newLine).joinToString("\n", postfix = "\n"))
     }
 
@@ -153,26 +163,11 @@ class LocalGoldStore(private val context: Context) {
 
         val f = file(account)
         val exists = f.exists() && f.useLines { lines ->
-            lines.any { line ->
-                val q = runCatching {
-                    ((json.parseToJsonElement(line.trim()) as? JsonObject)
-                        ?.get("question") as? JsonPrimitive)?.content
-                }.getOrNull()
-                q == targetQ
-            }
+            lines.any { parseQuestion(it) == targetQ }
         }
         if (exists) return@withContext
 
-        val newLine = buildJsonObject {
-            put("scene", scene)
-            put("question", targetQ)
-            put("answer", answer)
-            put("risk_note", riskNote)
-            putJsonArray("embedding") {
-                embedding.forEach { add(JsonPrimitive(it)) }
-            }
-        }.toString()
-        f.appendText(newLine + "\n")
+        f.appendText(buildLine(scene, targetQ, answer, riskNote, embedding) + "\n")
     }
 
     /** 读取被用户降级（取消金标）的 question 集合。 */
@@ -201,12 +196,9 @@ class LocalGoldStore(private val context: Context) {
             val keep = f.useLines { lines ->
                 lines.mapNotNull { line ->
                     val trimmed = line.trim()
-                    if (trimmed.isEmpty()) return@mapNotNull null
-                    val lq = runCatching {
-                        ((json.parseToJsonElement(trimmed) as? JsonObject)
-                            ?.get("question") as? JsonPrimitive)?.content
-                    }.getOrNull()
-                    if (lq == q) null else trimmed
+                    if (trimmed.isEmpty()) null
+                    else if (parseQuestion(trimmed) == q) null
+                    else trimmed
                 }.toList()
             }
             f.writeText(if (keep.isEmpty()) "" else keep.joinToString("\n", postfix = "\n"))

@@ -11,11 +11,9 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
+import com.xingshu.helper.data.repository.sharedJson
 import okhttp3.Request
 import java.io.File
-import java.util.concurrent.TimeUnit
 
 /**
  * 检查 GitHub Releases 上的最新版本，比当前版本新则提示更新。
@@ -27,7 +25,7 @@ import java.util.concurrent.TimeUnit
  */
 object UpdateChecker {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = sharedJson
 
     private val client = GitHubMirrors.client
 

@@ -26,7 +26,7 @@ import java.security.MessageDigest
  */
 class CorpusSyncManager(private val context: Context) {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = sharedJson
 
     @Serializable
     data class Manifest(

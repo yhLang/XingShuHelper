@@ -12,7 +12,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 class SnippetRepository(private val context: Context) {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = sharedJson
 
     suspend fun load(account: BusinessAccount): List<Snippet> = withContext(Dispatchers.IO) {
         val name = "snippets_${account.key}.json"

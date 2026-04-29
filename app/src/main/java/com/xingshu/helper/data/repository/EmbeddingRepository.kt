@@ -20,7 +20,7 @@ class EmbeddingRepository {
 
     private val client = sharedHttpClient
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = sharedJson
 
     /**
      * 单条 query embedding 的 LRU 缓存。客服在一轮会话里反复点"生成"或"结合 AI"

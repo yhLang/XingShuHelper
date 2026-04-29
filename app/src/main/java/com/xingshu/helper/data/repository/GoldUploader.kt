@@ -27,7 +27,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
  */
 object GoldUploader {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = sharedJson
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
     fun isConfigured(): Boolean = BuildConfig.CORPUS_UPLOAD_URL.isNotBlank()

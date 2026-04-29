@@ -27,7 +27,7 @@ class AIRepository {
 
     private val client = sharedHttpClient
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = sharedJson
 
     /**
      * 给一条标准答案反推可能的客户问法（用于添加金标 QA 时 AI 自动生成 Q 变体）。
@@ -404,15 +404,4 @@ class AIRepository {
         }
     }
 
-    private fun extractApiError(body: String): String? {
-        return try {
-            val obj = json.parseToJsonElement(body) as? JsonObject
-            obj?.get("error")
-                ?.let { it as? JsonObject }
-                ?.get("message")
-                ?.jsonPrimitive?.content
-        } catch (_: Exception) {
-            null
-        }
-    }
 }

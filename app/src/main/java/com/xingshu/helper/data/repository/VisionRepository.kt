@@ -31,7 +31,7 @@ class VisionRepository {
 
     private val client = sharedHttpClient
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = sharedJson
 
     fun extractDialog(
         bitmap: Bitmap,
@@ -140,15 +140,6 @@ class VisionRepository {
             )
         } catch (e: Exception) {
             Log.w(TAG, "parseDialog failed", e)
-            null
-        }
-    }
-
-    private fun extractApiError(body: String): String? {
-        return try {
-            val obj = json.parseToJsonElement(body) as? JsonObject
-            obj?.get("error")?.jsonObject?.get("message")?.jsonPrimitive?.content
-        } catch (_: Exception) {
             null
         }
     }

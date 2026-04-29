@@ -116,6 +116,12 @@ class PanelViewModel(
     // 任何写入 LocalGoldStore 或 corpus sync 后必须 invalidate 对应账号的 entry。
     private val corpusCache = mutableMapOf<BusinessAccount, List<Pair<QAItem, FloatArray>>>()
 
+    // 这几个 service 之前在 loadCorpus / autoSyncCorpus / syncCorpus 里各 new 一份，
+    // 提到字段共用一个实例，省构造和重复 mkdirs 检查。
+    private val corpusSyncManager = CorpusSyncManager(appContext)
+    private val localGoldStore = LocalGoldStore(appContext)
+    private val qaCorpusLoader = QACorpusLoader(appContext)
+
     private fun invalidateCorpusCache(account: BusinessAccount) {
         corpusCache.remove(account)
     }
@@ -209,11 +215,11 @@ class PanelViewModel(
     private suspend fun loadCorpus(account: BusinessAccount) {
         try {
             val cached = corpusCache[account]
-            val corpus = cached ?: QACorpusLoader(appContext).load(account).also {
+            val corpus = cached ?: qaCorpusLoader.load(account).also {
                 corpusCache[account] = it
             }
             vectorStore.initialize(corpus)
-            val version = CorpusSyncManager(appContext).localVersion(account)
+            val version = corpusSyncManager.localVersion(account)
             _state.update { it.copy(corpusReady = true, corpusVersion = version) }
             val src = if (cached != null) "缓存" else "磁盘"
             android.util.Log.d("PanelViewModel", "RAG 语料库加载完成 [${account.key}]: ${corpus.size} 条（来自$src），本地金标版本 $version")
@@ -227,16 +233,16 @@ class PanelViewModel(
 
     /** 启动后台静默同步金标，与用户操作并行；失败仅写日志，不打扰用户。 */
     private fun autoSyncCorpus(account: BusinessAccount) {
-        if (!CorpusSyncManager(appContext).isConfigured()) return
+        if (!corpusSyncManager.isConfigured()) return
         viewModelScope.launch {
-            val mgr = CorpusSyncManager(appContext)
+            val mgr = corpusSyncManager
             val ok = mgr.sync(account) { s -> _state.update { it.copy(corpusSync = s) } }
             val finalState = _state.value.corpusSync
             if (ok && finalState is CorpusSyncManager.State.Updated) {
                 // 拉到了新版本 → 失效缓存 + 重新加载向量库 + snackbar
                 invalidateCorpusCache(account)
                 try {
-                    val corpus = QACorpusLoader(appContext).load(account)
+                    val corpus = qaCorpusLoader.load(account)
                     corpusCache[account] = corpus
                     vectorStore.initialize(corpus)
                     _state.update {
@@ -256,7 +262,7 @@ class PanelViewModel(
     fun syncCorpus() {
         val account = _state.value.account
         viewModelScope.launch {
-            val mgr = CorpusSyncManager(appContext)
+            val mgr = corpusSyncManager
             val ok = mgr.sync(account) { s ->
                 _state.update { it.copy(corpusSync = s) }
             }
@@ -369,7 +375,7 @@ class PanelViewModel(
                 ) to vec
             }
             // 3) 持久化 + 立刻 push 到 VectorStore
-            LocalGoldStore(appContext).append(account, entries)
+            localGoldStore.append(account, entries)
             vectorStore.appendEntries(entries)
             invalidateCorpusCache(account)
 
@@ -421,7 +427,7 @@ class PanelViewModel(
             isLocal = true,
         )
         viewModelScope.launch {
-            LocalGoldStore(appContext).upsert(
+            localGoldStore.upsert(
                 account = account,
                 question = question,
                 scene = updated.scene,
@@ -490,7 +496,7 @@ class PanelViewModel(
             return
         }
         viewModelScope.launch {
-            val store = LocalGoldStore(appContext)
+            val store = localGoldStore
             val demoted = store.loadDemoted(account)
             if (question in demoted) {
                 // 之前被降级过，撤销即可恢复金标 boost
@@ -525,7 +531,7 @@ class PanelViewModel(
             return
         }
         viewModelScope.launch {
-            LocalGoldStore(appContext).addDemoted(account, question)
+            localGoldStore.addDemoted(account, question)
             vectorStore.setGoldByQuestion(question, false)
             invalidateCorpusCache(account)
             applyGoldFlagToState(question, false)
