@@ -1,23 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-PoC 配置：临时探测微信单聊节点结构，验证完会删。
-- packageNames：只监听微信，不读其他应用内容
-- typeWindowContentChanged：客户/自己发新消息时触发
-- typeWindowStateChanged：切换对话窗口时触发
-- 仅请求 retrieveWindowContent，不要求 canPerformGestures / canRetrieveText 等高危能力
--->
-<!--
-  PoC 调试期间临时配置：
-  - accessibilityEventTypes=typeAllMask 收所有事件类型，确认服务有没有真的连
-  - 不限定 packageNames（注释掉），看是否任何应用都没事件
-  - flag 加 flagReportViewIds 便于打 view-id
-  验证完节点稳定后，正式版会改回 packageNames="com.tencent.mm" + 仅 STATE/CONTENT
+  无障碍服务配置：
+  - 仅监听微信前台窗口事件（不读其他 App）
+  - 仅请求 retrieveWindowContent（最低权限），用于定位输入框节点
+  - 不要求点击 / 手势 / 按键能力
+  - 当前用途：填回微信底部输入框（SET_TEXT），不点发送
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityEventTypes="typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:accessibilityFlags="flagDefault"
     android:canRetrieveWindowContent="true"
     android:description="@string/probe_accessibility_description"
-    android:notificationTimeout="100"
+    android:notificationTimeout="200"
+    android:packageNames="com.tencent.mm"
     android:settingsActivity="com.xingshu.helper.MainActivity" />

@@ -5,5 +5,5 @@
     <string name="notification_channel_name">悬浮助手</string>
     <string name="notification_title">行恕客服助手运行中</string>
     <string name="notification_text">点击可返回设置</string>
-    <string name="probe_accessibility_description">【调试】临时探测微信单聊对话结构，仅打印日志到 logcat，不上传任何内容。验证完会移除。</string>
+    <string name="probe_accessibility_description">用于把生成的回复直接填入微信输入框，省去切回微信粘贴的步骤。仅在您点击"填入微信"时触发，不读取对话内容、不自动发送。</string>
 </resources>
