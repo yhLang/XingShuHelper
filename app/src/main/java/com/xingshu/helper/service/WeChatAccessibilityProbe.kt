@@ -62,16 +62,15 @@ class WeChatAccessibilityProbe : AccessibilityService() {
 
     private fun handleContentChanged(event: AccessibilityEvent) {
         val root = rootInActiveWindow ?: return
-        // 节流：只在前 5 秒详细打印，之后每 50 个 content 事件打印一次摘要，避免 log 洪水
         contentEventCount++
-        val verbose = contentEventCount <= 20 || contentEventCount % 50 == 0L
-        if (!verbose) return
 
-        val title = root.findTitle().orEmpty()
         val dm = resources.displayMetrics
         val screenW = dm.widthPixels
         val screenH = dm.heightPixels
+
+        // 每条 CONTENT 都先做一次轻量统计，便于看气泡识别情况
         val bubbles = root.collectBubbles(screenW, screenH)
+        val title = root.findTitle().orEmpty()
         val customerCount = bubbles.count { it.role == Role.CUSTOMER }
         val meCount = bubbles.count { it.role == Role.ME }
         val unknownCount = bubbles.count { it.role == Role.UNKNOWN }
@@ -83,9 +82,36 @@ class WeChatAccessibilityProbe : AccessibilityService() {
                 "screen=${screenW}x${screenH}"
         )
 
-        // 详细模式：打印最后 3 条气泡的 role + 文本前 30 字 + 横坐标，方便判断左右识别准不准
         bubbles.takeLast(3).forEach { b ->
             Log.v(TAG, "  └─ ${b.role} x=${b.centerX} \"${b.text.take(30).replace('\n', ' ')}\"")
+        }
+
+        // 关键诊断：如果 bubbles=0 但是收到了大量 RAW，说明 walk 找不到 TextView。
+        // 每 30 个事件做一次 deep dump，把整个 view tree 的所有有文字的节点都打出来，
+        // 看微信到底用什么 className 装文字（可能是自定义 View 或 ImageView 带 contentDescription）
+        if (bubbles.isEmpty() && contentEventCount % 30 == 0L) {
+            Log.w(TAG, "[DUMP] bubbles=0, dumping all text-bearing nodes of root:")
+            var nodeCount = 0
+            var textBearingCount = 0
+            root.walk { node ->
+                nodeCount++
+                val txt = node.text?.toString().orEmpty()
+                val desc = node.contentDescription?.toString().orEmpty()
+                if (txt.isNotBlank() || desc.isNotBlank()) {
+                    textBearingCount++
+                    val rect = android.graphics.Rect()
+                    node.getBoundsInScreen(rect)
+                    Log.w(
+                        TAG,
+                        "  cls=${node.className} " +
+                            "id=${node.viewIdResourceName ?: "-"} " +
+                            "x=${rect.left}-${rect.right} y=${rect.top}-${rect.bottom} " +
+                            "txt=\"${txt.take(40).replace('\n', ' ')}\" " +
+                            "desc=\"${desc.take(40).replace('\n', ' ')}\""
+                    )
+                }
+            }
+            Log.w(TAG, "[DUMP] total nodes=$nodeCount, text-bearing=$textBearingCount")
         }
     }
 
