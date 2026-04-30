@@ -30,13 +30,15 @@ import com.xingshu.helper.ui.panel.PanelViewModel
 import com.xingshu.helper.ui.panel.ReferencedQa
 
 @Composable
-fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
+fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () -> Unit = {}) {
     val context = LocalContext.current
     var copiedLabel by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(copiedLabel) {
         if (copiedLabel != null) {
-            delay(1500)
+            // 复制成功 → 短暂显示 ✓ 反馈 → 自动关闭面板，让用户切回微信粘贴
+            delay(600)
+            onClose()
             copiedLabel = null
         }
     }

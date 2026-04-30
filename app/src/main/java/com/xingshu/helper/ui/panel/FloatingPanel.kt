@@ -77,7 +77,7 @@ fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
                 Box(modifier = Modifier.fillMaxWidth()) {
                     when (state.currentScreen) {
                         PanelScreen.MAIN -> MainContent(state = state, viewModel = viewModel)
-                        PanelScreen.RESULT -> ResultContent(state = state, viewModel = viewModel)
+                        PanelScreen.RESULT -> ResultContent(state = state, viewModel = viewModel, onClose = onClose)
                         PanelScreen.SETTINGS -> SettingsContent(
                             currentAccount = state.account,
                             corpusReady = state.corpusReady,
