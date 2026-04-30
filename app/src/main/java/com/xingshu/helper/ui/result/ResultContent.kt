@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -25,7 +24,6 @@ import androidx.compose.ui.unit.sp
 import com.xingshu.helper.data.model.GeneratedResult
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
-import com.xingshu.helper.data.model.QAItem
 import com.xingshu.helper.data.model.RagMatch
 import com.xingshu.helper.ui.panel.PanelUiState
 import com.xingshu.helper.ui.panel.PanelViewModel
@@ -86,8 +84,6 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                     }
                     result.ragMatches.forEachIndexed { index, match ->
                         item {
-                            // referencedQas 顺序与 ragMatches 一致：第 i 条 QAItem 即是 ragMatches[i] 的来源
-                            val sourceItem = state.referencedQas.getOrNull(index)?.item
                             RagMatchCard(
                                 rank = index + 1,
                                 match = match,
