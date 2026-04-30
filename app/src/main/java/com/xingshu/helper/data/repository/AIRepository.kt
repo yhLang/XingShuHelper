@@ -56,22 +56,50 @@ class AIRepository {
         contextItems: List<QAItem> = emptyList(),
         structuredContext: String = ""
     ): Flow<GenerateState> {
-        // 渲染成清晰的、按时间顺序的两人对话，[客户] / [我] 双前缀让模型分清说话方
-        val userContent = buildString {
-            appendLine("以下是与客户的最近微信对话（按时间从早到晚）：")
-            appendLine()
-            dialog.forEach { msg ->
-                val tag = when (msg.role) {
-                    com.xingshu.helper.data.model.DialogRole.CUSTOMER -> "[客户]"
-                    com.xingshu.helper.data.model.DialogRole.ME -> "[我]"
-                }
-                appendLine("$tag ${msg.text}")
-            }
-            appendLine()
-            appendLine("请基于完整对话上下文，为客户最后一句（或最近未回复的消息）生成回复草稿。")
-            appendLine("注意：参考[我]已经说过的话，不要重复或自相矛盾。")
-        }
+        val userContent = buildDialogContent(dialog)
         return runChatCompletion(userContent, apiKey, baseUrl, contextItems, structuredContext)
+    }
+
+    /** 结构化查询路径：直接用结构化 KB 生成，不走 RAG，不附话术库兜底。 */
+    fun generateStructured(
+        messages: List<String>,
+        apiKey: String,
+        baseUrl: String,
+        structuredContext: String
+    ): Flow<GenerateState> {
+        val userContent = if (messages.size == 1) {
+            "客户消息：${messages[0]}"
+        } else {
+            "客户连续发来的消息（按顺序）：\n" +
+                    messages.mapIndexed { i, m -> "${i + 1}. $m" }.joinToString("\n")
+        }
+        return runChatCompletion(userContent, apiKey, baseUrl, emptyList(), structuredContext, useQaFallback = false)
+    }
+
+    /** 结构化查询路径（对话版）：直接用结构化 KB 生成，不走 RAG，不附话术库兜底。 */
+    fun generateStructuredFromDialog(
+        dialog: List<com.xingshu.helper.data.model.DialogMessage>,
+        apiKey: String,
+        baseUrl: String,
+        structuredContext: String
+    ): Flow<GenerateState> {
+        val userContent = buildDialogContent(dialog)
+        return runChatCompletion(userContent, apiKey, baseUrl, emptyList(), structuredContext, useQaFallback = false)
+    }
+
+    private fun buildDialogContent(dialog: List<com.xingshu.helper.data.model.DialogMessage>): String = buildString {
+        appendLine("以下是与客户的最近微信对话（按时间从早到晚）：")
+        appendLine()
+        dialog.forEach { msg ->
+            val tag = when (msg.role) {
+                com.xingshu.helper.data.model.DialogRole.CUSTOMER -> "[客户]"
+                com.xingshu.helper.data.model.DialogRole.ME -> "[我]"
+            }
+            appendLine("$tag ${msg.text}")
+        }
+        appendLine()
+        appendLine("请基于完整对话上下文，为客户最后一句（或最近未回复的消息）生成回复草稿。")
+        appendLine("注意：参考[我]已经说过的话，不要重复或自相矛盾。")
     }
 
     private fun runChatCompletion(
@@ -79,7 +107,8 @@ class AIRepository {
         apiKey: String,
         baseUrl: String,
         contextItems: List<QAItem>,
-        structuredContext: String = ""
+        structuredContext: String = "",
+        useQaFallback: Boolean = true
     ): Flow<GenerateState> = flow {
         emit(GenerateState.Loading)
 
@@ -88,8 +117,13 @@ class AIRepository {
             return@flow
         }
 
-        val effectiveItems = contextItems.ifEmpty { QALibrary.items }
-        val systemPrompt = QALibrary.buildPrompt(effectiveItems, structuredContext)
+        val systemPrompt = if (!useQaFallback && structuredContext.isNotBlank()) {
+            // 结构化路径：专用 prompt，直接引用结构化数据，不附话术库
+            QALibrary.buildStructuredPrompt(structuredContext)
+        } else {
+            val effectiveItems = contextItems.ifEmpty { QALibrary.items }
+            QALibrary.buildPrompt(effectiveItems, structuredContext)
+        }
 
         val body = buildJsonObject {
             put("model", com.xingshu.helper.AppConfig.CHAT_MODEL)

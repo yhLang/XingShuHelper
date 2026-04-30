@@ -123,6 +123,18 @@ object QALibrary {
     // 都会让 cache miss。维护时务必保持本字段在进程生命周期内字节级一致。
     val systemPrompt: String = buildPrompt(items)
 
+    /**
+     * 结构化查询专用 prompt：只注入结构化数据，不附话术库。
+     * 明确告知模型可以直接引用价格/时段，不需要引导来咨询。
+     */
+    fun buildStructuredPrompt(structuredContext: String): String = buildString {
+        appendLine(STRUCTURED_ROLE_INSTRUCTION)
+        appendLine()
+        appendLine("## 当期课程结构化数据（请直接根据以下数据作答，数据已准确）")
+        appendLine()
+        appendLine(structuredContext.trimEnd())
+    }
+
     // 输出 schema 已由 AIRepository 的 tool calling 强制约束，prompt 里不再重复说明。
     fun buildPrompt(contextItems: List<QAItem>, structuredContext: String = ""): String = buildString {
         appendLine(ROLE_INSTRUCTION)
@@ -156,6 +168,21 @@ object QALibrary {
 - 不贬低同行
 - 优先引导预约试听课
 - 遇到不确定信息，提醒人工确认
+
+## 敏感场景（必须标记 is_sensitive: true）
+退费、投诉、老师更换、价格优惠、付款问题、效果保证、考级/比赛保证、孩子心理/健康问题、负面评价或纠纷
+    """.trimIndent()
+
+    // 结构化查询专用指令：数据已提供，可以直接引用，不用引导来咨询
+    private val STRUCTURED_ROLE_INSTRUCTION = """
+你是行恕书画艺术培训中心的 AI 客服助手，专门帮助前台客服人员快速生成微信回复草稿。
+
+## 回复原则
+- 语气自然亲切，像微信真人客服，不要像官方模板
+- 下方已提供准确的价格、时段、地址信息，请直接引用，无需引导来咨询
+- 不承诺效果、不保证考级通过、不保证获奖
+- 不贬低同行
+- 回答完结构化信息后，可顺势引导预约试听
 
 ## 敏感场景（必须标记 is_sensitive: true）
 退费、投诉、老师更换、价格优惠、付款问题、效果保证、考级/比赛保证、孩子心理/健康问题、负面评价或纠纷

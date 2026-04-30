@@ -22,6 +22,7 @@ import com.xingshu.helper.data.repository.AIRepository
 import com.xingshu.helper.data.repository.CorpusSyncManager
 import com.xingshu.helper.data.repository.EmbeddingRepository
 import com.xingshu.helper.data.repository.QACorpusLoader
+import com.xingshu.helper.data.repository.QueryRouter
 import com.xingshu.helper.data.repository.SnippetRepository
 import com.xingshu.helper.data.repository.StructuredKnowledgeBase
 import com.xingshu.helper.data.repository.VectorStore
@@ -359,12 +360,21 @@ class PanelViewModel(
         doGenerate(messages)
     }
 
-    /** 默认入口：直接 RAG 匹配，不调 LLM。结果页上若用户不满意可点"结合 AI"按钮再走 generateWithAi()。 */
+    /**
+     * 默认入口：先判断是否结构化查询（价格/时段/地址）。
+     * - 结构化查询 → 直接调 LLM + 结构化 KB，跳过 RAG
+     * - 话术查询 → RAG 匹配，用户可在结果页点"结合 AI"再走 generateWithAi()
+     */
     private fun doGenerate(messages: List<String>) {
         _state.update { it.copy(lastQuery = LastQuery.Messages(messages)) }
         generateJob?.cancel()
         generateJob = viewModelScope.launch {
-            doRagOnly(messages.joinToString("\n"))
+            val query = messages.joinToString("\n")
+            if (QueryRouter.route(query) == QueryRouter.RouteType.STRUCTURED) {
+                doStructuredGenerate(messages = messages, dialog = null)
+            } else {
+                doRagOnly(query)
+            }
         }
     }
 
@@ -377,8 +387,33 @@ class PanelViewModel(
             val customerOnly = dialog.filter { it.role == DialogRole.CUSTOMER }
                 .takeLast(3)
                 .joinToString("\n") { it.text }
-            doRagOnly(customerOnly)
+            if (QueryRouter.route(customerOnly) == QueryRouter.RouteType.STRUCTURED) {
+                doStructuredGenerate(messages = null, dialog = dialog)
+            } else {
+                doRagOnly(customerOnly)
+            }
         }
+    }
+
+    /**
+     * 结构化查询路径：直接调 LLM，只注入结构化 KB，不走 RAG embedding/向量检索。
+     * 如果结构化 KB 未加载（空），降级为话术 RAG 路径。
+     */
+    private suspend fun doStructuredGenerate(messages: List<String>?, dialog: List<DialogMessage>?) {
+        if (currentStructuredContext.isBlank()) {
+            val query = messages?.joinToString("\n")
+                ?: dialog!!.filter { it.role == DialogRole.CUSTOMER }.takeLast(3).joinToString("\n") { it.text }
+            android.util.Log.w("PanelViewModel", "结构化 KB 未加载，降级走 RAG")
+            doRagOnly(query)
+            return
+        }
+        android.util.Log.d("PanelViewModel", "结构化路径：跳过 RAG 直接调 LLM")
+        val flow = if (messages != null) {
+            aiRepository.generateStructured(messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, currentStructuredContext)
+        } else {
+            aiRepository.generateStructuredFromDialog(dialog!!, AppConfig.API_KEY, AppConfig.API_BASE_URL, currentStructuredContext)
+        }
+        flow.collect { collectGenerateState(it) }
     }
 
     /** 结果页"结合 AI"按钮触发：复用刚才已检索好的 RAG 上下文（不再调 embedding API），调 LLM 生成三版回复。 */
