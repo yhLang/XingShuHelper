@@ -36,11 +36,15 @@ class WeChatAccessibilityProbe : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
+        // 调试：所有事件先打一行心跳，确认服务真的在收事件
+        Log.v(TAG, "[RAW] pkg=${event.packageName} type=${AccessibilityEvent.eventTypeToString(event.eventType)} cls=${event.className}")
+
         if (event.packageName != WECHAT_PKG) return
 
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> handleStateChanged(event)
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> handleContentChanged(event)
+            else -> Log.d(TAG, "[OTHER] type=${AccessibilityEvent.eventTypeToString(event.eventType)}")
         }
     }
 
