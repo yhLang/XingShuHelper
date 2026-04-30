@@ -464,10 +464,6 @@ class PanelViewModel(
         return hits
     }
 
-    private suspend fun retrieveContext(query: String): List<QAItem> {
-        return retrieveContextWithScores(query).map { (item, _) -> item }
-    }
-
     private fun collectGenerateState(state: GenerateState) {
         _state.update { it.copy(generateState = state) }
         if (state is GenerateState.Success || state is GenerateState.Error) {
