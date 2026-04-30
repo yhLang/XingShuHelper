@@ -39,12 +39,16 @@ class WeChatAccessibilityProbe : AccessibilityService() {
         // 调试：所有事件先打一行心跳，确认服务真的在收事件
         Log.v(TAG, "[RAW] pkg=${event.packageName} type=${AccessibilityEvent.eventTypeToString(event.eventType)} cls=${event.className}")
 
-        if (event.packageName != WECHAT_PKG) return
+        // 交叉验证用：除了微信，对短信类 App 也做 dump，看其他 App 能不能正常 dump 出文字
+        // 如果短信能 dump 出对话内容、微信不能 → 证实是微信反屏蔽
+        val pkg = event.packageName?.toString() ?: return
+        val isTargetPkg = pkg == WECHAT_PKG || pkg in CROSS_VERIFY_PKGS
+        if (!isTargetPkg) return
 
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> handleStateChanged(event)
-            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> handleContentChanged(event)
-            else -> Log.d(TAG, "[OTHER] type=${AccessibilityEvent.eventTypeToString(event.eventType)}")
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> handleContentChanged(event, pkg)
+            else -> Log.d(TAG, "[OTHER] pkg=$pkg type=${AccessibilityEvent.eventTypeToString(event.eventType)}")
         }
     }
 
@@ -60,7 +64,7 @@ class WeChatAccessibilityProbe : AccessibilityService() {
         Log.d(TAG, "[STATE] activity=$className title=\"$title\" inChat=${className in CHAT_ACTIVITY_HINTS}")
     }
 
-    private fun handleContentChanged(event: AccessibilityEvent) {
+    private fun handleContentChanged(event: AccessibilityEvent, pkg: String) {
         val root = rootInActiveWindow ?: return
         contentEventCount++
 
@@ -77,7 +81,7 @@ class WeChatAccessibilityProbe : AccessibilityService() {
 
         Log.d(
             TAG,
-            "[CONTENT] #$contentEventCount title=\"$title\" bubbles=${bubbles.size} " +
+            "[CONTENT] #$contentEventCount pkg=$pkg title=\"$title\" bubbles=${bubbles.size} " +
                 "customer=$customerCount me=$meCount unknown=$unknownCount " +
                 "screen=${screenW}x${screenH}"
         )
@@ -89,8 +93,9 @@ class WeChatAccessibilityProbe : AccessibilityService() {
         // 关键诊断：如果 bubbles=0 但是收到了大量 RAW，说明 walk 找不到 TextView。
         // 每 30 个事件做一次 deep dump，把整个 view tree 的所有有文字的节点都打出来，
         // 看微信到底用什么 className 装文字（可能是自定义 View 或 ImageView 带 contentDescription）
-        if (bubbles.isEmpty() && contentEventCount % 30 == 0L) {
-            Log.w(TAG, "[DUMP] bubbles=0, dumping all text-bearing nodes of root:")
+        // 缩小到每 10 个触发一次 dump，方便快速看到结果
+        if (bubbles.isEmpty() && contentEventCount % 10 == 0L) {
+            Log.w(TAG, "[DUMP] pkg=$pkg bubbles=0, dumping all text-bearing nodes of root:")
             var nodeCount = 0
             var textBearingCount = 0
             root.walk { node ->
@@ -217,6 +222,18 @@ class WeChatAccessibilityProbe : AccessibilityService() {
             "com.tencent.mm.ui.LauncherUI",
             "com.tencent.mm.ui.chatting.ChattingUI",
             "com.tencent.mm.plugin.chatroom.ui.ChatroomInfoUI"
+        )
+        // 交叉验证：用短信/QQ 等其他聊天类 App 做对照组，
+        // 如果它们能 dump 出文字而微信不能 → 证实是微信反屏蔽，不是我们代码或设备问题
+        private val CROSS_VERIFY_PKGS = setOf(
+            "com.android.mms",                         // 原生短信
+            "com.android.messaging",                   // 原生 messaging
+            "com.google.android.apps.messaging",       // Google Messages
+            "com.xiaomi.smsmms",                       // 小米信息
+            "com.android.incallui",                    // 通话历史
+            "com.tencent.mobileqq",                    // QQ
+            "com.alibaba.android.rimet",               // 钉钉
+            "com.eg.android.AlipayGphone"              // 支付宝（也有聊天）
         )
     }
 }
