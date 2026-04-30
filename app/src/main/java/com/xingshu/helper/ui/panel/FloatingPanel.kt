@@ -296,21 +296,23 @@ private fun ClipboardSection(state: PanelUiState, viewModel: PanelViewModel, isL
                 "📋 剪贴板识别（推荐）",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.weight(1f)
             )
+            // 面板打开时已自动读过一次；只有用户在微信复制了新内容后回来才需要手动刷新
+            TextButton(
+                onClick = { viewModel.readClipboard() },
+                enabled = !isLoading,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+            ) {
+                Text("刷新", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
         }
         Text(
-            "在微信长按客户消息→复制，然后点下方按钮读取",
+            "在微信长按客户消息→复制后回来，下方会自动显示",
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onPrimaryContainer
         )
-        Button(
-            onClick = { viewModel.readClipboard() },
-            enabled = !isLoading,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("读取剪贴板")
-        }
 
         when (state.clipboardStatus) {
             ClipboardStatus.EMPTY -> Text(
