@@ -492,32 +492,48 @@ class PanelViewModel(
      * 销毁面板，附在 Composable 上的 scope 会被立刻 cancel，导致 delay 后的 fillReply
      * 永远跑不到。
      */
+    /**
+     * 把回复填入微信。流程：
+     *   1. 拉起微信（停在上次离开的页面）
+     *   2. 第一次延时 800ms 等微信渲染
+     *   3. 轮询找输入框最多 6 秒；落在聊天列表时给客服时间手动点开某个对话
+     *   4. 找到就 SET_TEXT，超时就提示"请长按粘贴"
+     * 用 viewModelScope 而不是 Composable 的 scope，避免 onClose() 销毁面板后协程被取消。
+     */
     fun fillReplyToWeChat(text: String) {
         android.util.Log.i("PanelViewModel", "fillReplyToWeChat entered, text=${text.take(30)}")
         viewModelScope.launch {
             try {
-                android.util.Log.i("PanelViewModel", "coroutine started")
                 val launchIntent = appContext.packageManager
                     .getLaunchIntentForPackage("com.tencent.mm")
                     ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                android.util.Log.i("PanelViewModel", "launchIntent=$launchIntent")
                 if (launchIntent == null) {
                     showSnackbar("未找到微信，已复制到剪贴板")
                     return@launch
                 }
                 appContext.startActivity(launchIntent)
-                android.util.Log.i("PanelViewModel", "startActivity called, waiting 800ms")
-                kotlinx.coroutines.delay(800)
-                val result = com.xingshu.helper.service.WeChatAccessibilityProbe.fillReplyToWeChat(text)
-                android.util.Log.d("PanelViewModel", "fillReplyToWeChat result=$result")
-                val msg = when (result) {
-                    com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.Success ->
-                        "已填入微信"
+                kotlinx.coroutines.delay(800) // 等微信前台渲染
+
+                // 轮询：每 400ms 试一次，最多 6 秒。期间客服可以手动切到对话页。
+                val deadline = System.currentTimeMillis() + 6_000
+                var lastResult: com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult? = null
+                while (System.currentTimeMillis() < deadline) {
+                    val r = com.xingshu.helper.service.WeChatAccessibilityProbe.fillReplyToWeChat(text)
+                    lastResult = r
+                    if (r is com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.Success) {
+                        android.util.Log.d("PanelViewModel", "fillReplyToWeChat success after polling")
+                        showSnackbar("已填入微信")
+                        return@launch
+                    }
+                    kotlinx.coroutines.delay(400)
+                }
+                android.util.Log.d("PanelViewModel", "fillReplyToWeChat timeout, lastResult=$lastResult")
+                val msg = when (lastResult) {
                     com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.InputBoxNotFound ->
-                        "请打开具体对话页后长按粘贴（已复制）"
+                        "请打开具体对话页（已复制，可长按粘贴）"
                     com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.NotInWeChat ->
-                        "微信未在前台，请打开后长按粘贴（已复制）"
-                    else -> "填入失败，请长按粘贴（已复制）"
+                        "微信未在前台（已复制，可长按粘贴）"
+                    else -> "填入失败（已复制，可长按粘贴）"
                 }
                 showSnackbar(msg)
             } catch (t: Throwable) {
