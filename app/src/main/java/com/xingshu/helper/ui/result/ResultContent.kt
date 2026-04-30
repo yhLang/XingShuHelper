@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.util.Log
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,7 +18,6 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,7 +37,6 @@ import com.xingshu.helper.ui.panel.ReferencedQa
 @Composable
 fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () -> Unit = {}) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var copiedLabel by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(copiedLabel) {
@@ -66,33 +63,11 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         } else {
-            // 已授权：先复制兜底（万一拉起微信失败用户也能粘贴），关面板，启动微信，
-            // 延时让微信渲染完输入框，再触发 SET_TEXT
+            // 已授权：先复制兜底，关面板，把后续异步流程交给 ViewModel
+            // （Composable 的 scope 会随 onClose() 销毁而 cancel，delay 后的代码跑不到）
             copyText(context, text)
             onClose()
-            scope.launch {
-                val launchIntent = context.packageManager.getLaunchIntentForPackage("com.tencent.mm")
-                    ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                if (launchIntent == null) {
-                    viewModel.postSnackbar("未找到微信，已复制到剪贴板")
-                    return@launch
-                }
-                context.startActivity(launchIntent)
-                // 等微信前台渲染。800ms 是经验值：太短输入框还没绑，太长用户感觉卡
-                delay(800)
-                val result = WeChatAccessibilityProbe.fillReplyToWeChat(text)
-                Log.d("ResultContent", "fillToWeChat result=$result")
-                val msg = when (result) {
-                    WeChatAccessibilityProbe.Companion.FillResult.Success ->
-                        "已填入微信"
-                    WeChatAccessibilityProbe.Companion.FillResult.InputBoxNotFound ->
-                        "请打开具体对话页后长按粘贴（已复制）"
-                    WeChatAccessibilityProbe.Companion.FillResult.NotInWeChat ->
-                        "微信未在前台，请打开后长按粘贴（已复制）"
-                    else -> "填入失败，请长按粘贴（已复制）"
-                }
-                viewModel.postSnackbar(msg)
-            }
+            viewModel.fillReplyToWeChat(text)
         }
     }
 
