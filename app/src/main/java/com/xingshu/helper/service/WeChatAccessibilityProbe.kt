@@ -60,23 +60,32 @@ class WeChatAccessibilityProbe : AccessibilityService() {
         /** 服务是否已被系统绑定（用户已开无障碍权限）。 */
         fun isReady(): Boolean = instance != null
 
+        /** 填入结果，让 UI 给客服明确的提示。 */
+        sealed class FillResult {
+            object Success : FillResult()
+            object ServiceNotEnabled : FillResult()      // 用户没开无障碍权限
+            object NotInWeChat : FillResult()            // 当前前台不是微信
+            object InputBoxNotFound : FillResult()       // 在微信但找不到输入框（不在对话页）
+            object SetTextFailed : FillResult()          // 找到输入框但 SET_TEXT 调用失败
+        }
+
         /**
          * 把回复文本填入当前微信前台的输入框。仅 SET_TEXT，不点发送。
-         * @return true 表示找到了输入框并写入成功；false 表示当前不在微信、
-         *         或者找不到输入框节点（可能客服没把微信放前台）。
+         * 调用前必须保证微信已经在前台、且打开了某个具体的对话页（不是聊天列表）。
          */
-        fun fillReplyToWeChat(text: String): Boolean {
-            val svc = instance ?: return false
-            val root = svc.rootInActiveWindow ?: return false
-            if (root.packageName?.toString() != WECHAT_PKG) return false
-            val input = root.findInputEditText() ?: return false
+        fun fillReplyToWeChat(text: String): FillResult {
+            val svc = instance ?: return FillResult.ServiceNotEnabled
+            val root = svc.rootInActiveWindow ?: return FillResult.NotInWeChat
+            if (root.packageName?.toString() != WECHAT_PKG) return FillResult.NotInWeChat
+            val input = root.findInputEditText() ?: return FillResult.InputBoxNotFound
             val args = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
             }
-            return input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            val ok = input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            return if (ok) FillResult.Success else FillResult.SetTextFailed
         }
 
-        /** 在 view tree 里找输入框：标准 EditText，且大小可接受。 */
+        /** 在 view tree 里找输入框：标准 EditText 且 editable。 */
         private fun AccessibilityNodeInfo.findInputEditText(): AccessibilityNodeInfo? {
             val cls = className?.toString().orEmpty()
             if (cls == "android.widget.EditText" && isEditable) return this

@@ -483,6 +483,9 @@ class PanelViewModel(
         _state.update { it.copy(snackbar = msg) }
     }
 
+    /** 让 UI 层在外部触发提示（如"填入微信"按钮的反馈）。 */
+    fun postSnackbar(msg: String) = showSnackbar(msg)
+
     class Factory(private val context: Context) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             @Suppress("UNCHECKED_CAST")

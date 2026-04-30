@@ -3,6 +3,8 @@ package com.xingshu.helper.ui.result
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,6 +28,7 @@ import com.xingshu.helper.data.model.GeneratedResult
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.data.model.RagMatch
+import com.xingshu.helper.service.WeChatAccessibilityProbe
 import com.xingshu.helper.ui.panel.PanelUiState
 import com.xingshu.helper.ui.panel.PanelViewModel
 import com.xingshu.helper.ui.panel.ReferencedQa
@@ -40,6 +44,39 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
             delay(600)
             onClose()
             copiedLabel = null
+        }
+    }
+
+    // 统一的"填入微信"动作：根据无障碍服务返回结果给客服明确的反馈
+    val fillToWeChat: (String) -> Unit = { text ->
+        when (WeChatAccessibilityProbe.fillReplyToWeChat(text)) {
+            WeChatAccessibilityProbe.Companion.FillResult.Success -> {
+                viewModel.postSnackbar("已填入微信，回微信检查后发送")
+                onClose()
+            }
+            WeChatAccessibilityProbe.Companion.FillResult.ServiceNotEnabled -> {
+                viewModel.postSnackbar("请先在设置中开启无障碍权限")
+                context.startActivity(
+                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            WeChatAccessibilityProbe.Companion.FillResult.NotInWeChat -> {
+                // 文本仍走剪贴板，让客服可以手动粘贴
+                copyText(context, text)
+                viewModel.postSnackbar("微信不在前台，已复制到剪贴板")
+                onClose()
+            }
+            WeChatAccessibilityProbe.Companion.FillResult.InputBoxNotFound -> {
+                copyText(context, text)
+                viewModel.postSnackbar("请先打开具体对话页（已复制兜底）")
+                onClose()
+            }
+            WeChatAccessibilityProbe.Companion.FillResult.SetTextFailed -> {
+                copyText(context, text)
+                viewModel.postSnackbar("填入失败，已复制到剪贴板")
+                onClose()
+            }
         }
     }
 
@@ -95,6 +132,7 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
                                     copyText(context, match.answer)
                                     copiedLabel = "rag_$index"
                                 },
+                                onFill = { fillToWeChat(match.answer) },
                             )
                         }
                     }
@@ -113,7 +151,8 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
                             onCopy = {
                                 copyText(context, result.shortVersion)
                                 copiedLabel = "short"
-                            }
+                            },
+                            onFill = { fillToWeChat(result.shortVersion) }
                         )
                     }
 
@@ -126,7 +165,8 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
                             onCopy = {
                                 copyText(context, result.naturalVersion)
                                 copiedLabel = "natural"
-                            }
+                            },
+                            onFill = { fillToWeChat(result.naturalVersion) }
                         )
                     }
 
@@ -139,7 +179,8 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
                             onCopy = {
                                 copyText(context, result.inviteVersion)
                                 copiedLabel = "invite"
-                            }
+                            },
+                            onFill = { fillToWeChat(result.inviteVersion) }
                         )
                     }
 
@@ -224,7 +265,8 @@ private fun ReplyCard(
     labelColor: androidx.compose.ui.graphics.Color,
     content: String,
     copied: Boolean,
-    onCopy: () -> Unit
+    onCopy: () -> Unit,
+    onFill: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -234,28 +276,45 @@ private fun ReplyCard(
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Text(label, fontWeight = FontWeight.SemiBold, color = labelColor, fontSize = 13.sp)
+        Text(content, fontSize = 14.sp, lineHeight = 22.sp)
+        ReplyActions(copied = copied, onCopy = onCopy, onFill = onFill)
+    }
+}
+
+/**
+ * 复制 + 填入微信 两个等宽按钮。
+ * 主操作"填入微信"放右侧（拇指更易达），失败/未授权时会自动回退到剪贴板复制。
+ */
+@Composable
+private fun ReplyActions(copied: Boolean, onCopy: () -> Unit, onFill: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        OutlinedButton(
+            onClick = onCopy,
+            enabled = !copied,
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            modifier = Modifier.weight(1f).height(34.dp)
         ) {
-            Text(label, fontWeight = FontWeight.SemiBold, color = labelColor, fontSize = 13.sp)
-            FilledTonalButton(
-                onClick = onCopy,
-                enabled = !copied,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                modifier = Modifier.height(30.dp)
-            ) {
-                if (copied) {
-                    Text("已复制 ✓", fontSize = 12.sp)
-                } else {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("复制", fontSize = 12.sp)
-                }
+            if (copied) {
+                Text("已复制 ✓", fontSize = 12.sp)
+            } else {
+                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("复制", fontSize = 12.sp)
             }
         }
-        Text(content, fontSize = 14.sp, lineHeight = 22.sp)
+        Button(
+            onClick = onFill,
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            modifier = Modifier.weight(1f).height(34.dp)
+        ) {
+            Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("填入微信", fontSize = 12.sp)
+        }
     }
 }
 
@@ -305,6 +364,7 @@ private fun RagMatchCard(
     match: RagMatch,
     copied: Boolean,
     onCopy: () -> Unit,
+    onFill: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -316,48 +376,31 @@ private fun RagMatchCard(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "#$rank",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    match.scene,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                val pct = (match.score * 100).toInt()
-                Text(
-                    "${pct}%",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            FilledTonalButton(
-                onClick = onCopy,
-                enabled = !copied,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                modifier = Modifier.height(30.dp)
-            ) {
-                if (copied) {
-                    Text("已复制 ✓", fontSize = 12.sp)
-                } else {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("复制", fontSize = 12.sp)
-                }
-            }
+            Text(
+                "#$rank",
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                match.scene,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            val pct = (match.score * 100).toInt()
+            Text(
+                "${pct}%",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         Text(match.answer, fontSize = 14.sp, lineHeight = 22.sp)
+        ReplyActions(copied = copied, onCopy = onCopy, onFill = onFill)
     }
 }
 
