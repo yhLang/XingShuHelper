@@ -75,6 +75,9 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                if (state.factCheckIssues.isNotEmpty()) {
+                    item { FactCheckWarning(issues = state.factCheckIssues) }
+                }
                 if (result.isDirectMatch) {
                     // RAG 直接匹配模式：展示相似历史回答
                     item {
@@ -184,6 +187,45 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
         }
 
         else -> {}
+    }
+}
+
+/**
+ * 防幻觉警告：列出回复里出现但不在结构化 KB 里的价格/时段。
+ * 不阻止客服复制，只是醒目提示要核对。比 SensitiveWarning 更严肃，因为
+ * 这些字段如果发错（比如价格说错），客户会照着填到合同/付款里。
+ */
+@Composable
+private fun FactCheckWarning(issues: List<String>) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Icon(
+            Icons.Default.Warning,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(18.dp).padding(top = 2.dp)
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "⚠ 这些数字不在话术库里，可能是 AI 编造，请核对：",
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 13.sp
+            )
+            Text(
+                issues.joinToString("、"),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                lineHeight = 18.sp
+            )
+        }
     }
 }
 

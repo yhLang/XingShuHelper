@@ -21,6 +21,7 @@ import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
 import com.xingshu.helper.data.repository.CorpusSyncManager
 import com.xingshu.helper.data.repository.EmbeddingRepository
+import com.xingshu.helper.data.repository.FactChecker
 import com.xingshu.helper.data.repository.QACorpusLoader
 import com.xingshu.helper.data.repository.QueryRouter
 import com.xingshu.helper.data.repository.SnippetRepository
@@ -58,6 +59,8 @@ data class PanelUiState(
     val corpusSync: CorpusSyncManager.State = CorpusSyncManager.State.Idle,
     /** 当前账号本地已同步的金标版本号；0 表示尚未同步过（用 APK assets 兜底）。 */
     val corpusVersion: Int = 0,
+    /** 防幻觉校验：本次生成的回复里疑似虚构的价格/时段片段；空表示全部命中 KB。 */
+    val factCheckIssues: List<String> = emptyList(),
 )
 
 /** 暂存最近一次生成的输入，便于用户在结果页选择"结合 AI 重跑"。 */
@@ -466,8 +469,19 @@ class PanelViewModel(
 
     private fun collectGenerateState(state: GenerateState) {
         _state.update { it.copy(generateState = state) }
-        if (state is GenerateState.Success || state is GenerateState.Error) {
-            _state.update { it.copy(currentScreen = PanelScreen.RESULT) }
+        if (state is GenerateState.Success) {
+            // 防幻觉校验：把三版回复和 RAG 命中文本拼起来，逐个查价格/时段
+            val r = state.result
+            val combined = listOf(r.shortVersion, r.naturalVersion, r.inviteVersion)
+                .plus(r.ragMatches.map { it.answer })
+                .joinToString("\n")
+            val issues = FactChecker.check(combined, currentStructuredContext)
+            if (issues.isNotEmpty()) {
+                android.util.Log.w("PanelViewModel", "factCheck 疑似虚构：$issues")
+            }
+            _state.update { it.copy(currentScreen = PanelScreen.RESULT, factCheckIssues = issues) }
+        } else if (state is GenerateState.Error) {
+            _state.update { it.copy(currentScreen = PanelScreen.RESULT, factCheckIssues = emptyList()) }
         }
     }
 
