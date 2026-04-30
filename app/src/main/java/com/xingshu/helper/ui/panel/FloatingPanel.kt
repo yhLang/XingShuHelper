@@ -393,20 +393,21 @@ private fun ActionButtons(state: PanelUiState, viewModel: PanelViewModel, isLoad
 
                 Button(
                     onClick = { viewModel.generateSingle() },
-                    enabled = hasClipboard,
+                    enabled = hasClipboard && state.corpusReady,
                     modifier = Modifier.weight(1f)
-                ) { Text("单条生成") }
+                ) { Text(if (state.corpusReady) "单条生成" else "加载中…") }
             }
         }
 
         val buttonLabel = when {
+            !state.corpusReady -> "话术库加载中…"
             hasDialog -> "基于对话上下文生成回复（${state.dialogMessages.size} 条）"
             else -> "生成综合回复（${state.basket.size} 条）"
         }
 
         Button(
             onClick = { viewModel.generateFromBasket() },
-            enabled = canGenerate,
+            enabled = canGenerate && state.corpusReady,
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
         ) { Text(buttonLabel) }
