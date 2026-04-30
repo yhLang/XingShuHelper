@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,6 +39,7 @@ import com.xingshu.helper.ui.panel.ReferencedQa
 @Composable
 fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () -> Unit = {}) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var copiedLabel by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(copiedLabel) {
@@ -50,38 +52,45 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
     }
 
     // 统一的"填入微信"动作。
-    // 反馈用 Toast（系统级 UI）而不是 snackbar，因为 onClose() 销毁面板后
-    // snackbar 跟着没了；Toast 独立显示不受影响。
+    // 关键：当前面板是悬浮窗 → 用户必须先回到微信，无障碍服务才能拿到微信对话页的 root。
+    // 所以正确的时序是：检查权限 → 关面板 → 启动微信（重用最近的对话页）→ 等渲染 → 填入。
+    // Toast 在悬浮窗 context 上会被系统静默丢弃，反馈靠 ViewModel.snackbar；snackbar 在
+    // 下一次面板打开时仍能看到（误关保留逻辑已就位）。
     val fillToWeChat: (String) -> Unit = { text ->
-        val result = WeChatAccessibilityProbe.fillReplyToWeChat(text)
-        Log.d("ResultContent", "fillToWeChat result=$result text=${text.take(30)}")
-        when (result) {
-            WeChatAccessibilityProbe.Companion.FillResult.Success -> {
-                Toast.makeText(context, "已填入微信，回微信检查后发送", Toast.LENGTH_SHORT).show()
-                onClose()
-            }
-            WeChatAccessibilityProbe.Companion.FillResult.ServiceNotEnabled -> {
-                // 不关面板，用户回来后还能再点一次
-                Toast.makeText(context, "请开启「行恕客服助手」的无障碍权限", Toast.LENGTH_LONG).show()
-                context.startActivity(
-                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            }
-            WeChatAccessibilityProbe.Companion.FillResult.NotInWeChat -> {
-                copyText(context, text)
-                Toast.makeText(context, "微信不在前台，已复制到剪贴板", Toast.LENGTH_SHORT).show()
-                onClose()
-            }
-            WeChatAccessibilityProbe.Companion.FillResult.InputBoxNotFound -> {
-                copyText(context, text)
-                Toast.makeText(context, "请先打开具体对话页（已复制到剪贴板兜底）", Toast.LENGTH_LONG).show()
-                onClose()
-            }
-            WeChatAccessibilityProbe.Companion.FillResult.SetTextFailed -> {
-                copyText(context, text)
-                Toast.makeText(context, "填入失败，已复制到剪贴板", Toast.LENGTH_SHORT).show()
-                onClose()
+        if (!WeChatAccessibilityProbe.isReady()) {
+            // 未授权：不关面板，弹系统设置页让用户开权限后回来再点
+            viewModel.postSnackbar("请先开启无障碍权限")
+            context.startActivity(
+                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } else {
+            // 已授权：先复制兜底（万一拉起微信失败用户也能粘贴），关面板，启动微信，
+            // 延时让微信渲染完输入框，再触发 SET_TEXT
+            copyText(context, text)
+            onClose()
+            scope.launch {
+                val launchIntent = context.packageManager.getLaunchIntentForPackage("com.tencent.mm")
+                    ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (launchIntent == null) {
+                    viewModel.postSnackbar("未找到微信，已复制到剪贴板")
+                    return@launch
+                }
+                context.startActivity(launchIntent)
+                // 等微信前台渲染。800ms 是经验值：太短输入框还没绑，太长用户感觉卡
+                delay(800)
+                val result = WeChatAccessibilityProbe.fillReplyToWeChat(text)
+                Log.d("ResultContent", "fillToWeChat result=$result")
+                val msg = when (result) {
+                    WeChatAccessibilityProbe.Companion.FillResult.Success ->
+                        "已填入微信"
+                    WeChatAccessibilityProbe.Companion.FillResult.InputBoxNotFound ->
+                        "请打开具体对话页后长按粘贴（已复制）"
+                    WeChatAccessibilityProbe.Companion.FillResult.NotInWeChat ->
+                        "微信未在前台，请打开后长按粘贴（已复制）"
+                    else -> "填入失败，请长按粘贴（已复制）"
+                }
+                viewModel.postSnackbar(msg)
             }
         }
     }
