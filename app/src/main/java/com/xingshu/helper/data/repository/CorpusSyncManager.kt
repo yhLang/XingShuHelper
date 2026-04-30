@@ -149,16 +149,14 @@ class CorpusSyncManager(private val context: Context) {
         manifest.files.structured?.let { entry ->
             val structuredTmp = File(corpusDir(account), "structured.tmp")
             val structOk = downloadTo(rawUrl(entry.path), structuredTmp, entry.size, entry.sha256) {}
-            if (structOk) {
-                val renameOk = structuredTmp.renameTo(localStructuredFile(account))
-                if (!renameOk) {
-                    structuredTmp.delete()
-                    android.util.Log.w("CorpusSync", "结构化知识库重命名失败，继续使用旧版本")
-                }
-            } else {
+            if (!structOk) {
                 structuredTmp.delete()
                 android.util.Log.w("CorpusSync", "结构化知识库下载失败，继续使用 assets 版本")
+            } else if (!structuredTmp.renameTo(localStructuredFile(account))) {
+                structuredTmp.delete()
+                android.util.Log.w("CorpusSync", "结构化知识库重命名失败，继续使用旧版本")
             }
+            Unit
         }
 
         localManifestFile(account).writeText(json.encodeToString(Manifest.serializer(), manifest))

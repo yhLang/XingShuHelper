@@ -67,11 +67,12 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
         is GenerateState.Success -> {
             val result = genState.result
 
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                 if (result.isDirectMatch) {
                     // RAG 直接匹配模式：展示相似历史回答
                     item {
@@ -147,9 +148,17 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                 if (!result.isDirectMatch && state.referencedQas.isNotEmpty()) {
                     item { ReferenceSources(items = state.referencedQas) }
                 }
+                }
 
-                // 不满意时再调一次 LLM：RAG-only 是首次结合 AI，AI-combined 是再来一版
-                item {
+                // 固定底部按钮栏：内容滚动时按钮不消失，操作摩擦更低
+                HorizontalDivider()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Button(
                         onClick = { viewModel.generateWithAi() },
                         modifier = Modifier.fillMaxWidth()
@@ -160,9 +169,6 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                             fontSize = 14.sp
                         )
                     }
-                }
-
-                item {
                     OutlinedButton(
                         onClick = { viewModel.navigateTo(PanelScreen.MAIN) },
                         modifier = Modifier.fillMaxWidth()
