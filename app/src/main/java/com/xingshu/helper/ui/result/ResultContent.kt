@@ -57,6 +57,7 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
     // Toast 在悬浮窗 context 上会被系统静默丢弃，反馈靠 ViewModel.snackbar；snackbar 在
     // 下一次面板打开时仍能看到（误关保留逻辑已就位）。
     val fillToWeChat: (String) -> Unit = { text ->
+        Log.i("ResultContent", "fillToWeChat clicked, isReady=${WeChatAccessibilityProbe.isReady()}, text=${text.take(30)}")
         if (!WeChatAccessibilityProbe.isReady()) {
             // 未授权：不关面板，弹系统设置页让用户开权限后回来再点
             viewModel.postSnackbar("请先开启无障碍权限")
