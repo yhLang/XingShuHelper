@@ -14,17 +14,12 @@ data class QAItem(
     val questions: List<String>,
     val answer: String,
     val riskNote: String = "",
-    /** 金标话术：人工挑选的高质量回复，prompt 中会作为标准回复优先采用。 */
-    val isGold: Boolean = false,
-    /** 来自本地存储（用户在 App 内添加或修订），可改可删；assets 是只读的。 */
-    val isLocal: Boolean = false,
 )
 
 data class RagMatch(
     val scene: String,
     val answer: String,
     val score: Float,
-    val isGold: Boolean = false,
 )
 
 data class GeneratedResult(
@@ -47,7 +42,7 @@ sealed class GenerateState {
     data class Error(val message: String) : GenerateState()
 }
 
-enum class PanelScreen { MAIN, RESULT, SETTINGS, SNIPPETS, ADD_GOLD }
+enum class PanelScreen { MAIN, RESULT, SETTINGS, SNIPPETS }
 
 /** 常用片段：客服可一键复制的标准措辞，不走 RAG，直接静态加载。 */
 data class Snippet(

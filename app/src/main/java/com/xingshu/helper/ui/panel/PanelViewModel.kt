@@ -22,7 +22,6 @@ import com.xingshu.helper.data.repository.AIRepository
 import com.xingshu.helper.data.repository.CorpusSyncManager
 import com.xingshu.helper.data.repository.EmbeddingRepository
 import com.xingshu.helper.data.repository.GoldUploader
-import com.xingshu.helper.data.repository.LocalGoldStore
 import com.xingshu.helper.data.repository.QACorpusLoader
 import com.xingshu.helper.data.repository.SnippetRepository
 import com.xingshu.helper.data.repository.VectorStore
@@ -54,27 +53,10 @@ data class PanelUiState(
     val snippets: List<Snippet> = emptyList(),
     /** 上一次生成请求的输入，用于结果页"结合 AI 重跑"按钮。 */
     val lastQuery: LastQuery? = null,
-    /** 添加金标 QA 流程的状态。 */
-    val addGold: AddGoldState = AddGoldState(),
     /** 金标语料云同步状态。 */
     val corpusSync: CorpusSyncManager.State = CorpusSyncManager.State.Idle,
     /** 当前账号本地已同步的金标版本号；0 表示尚未同步过（用 APK assets 兜底）。 */
     val corpusVersion: Int = 0,
-)
-
-/** 添加金标 QA 表单状态。 */
-data class AddGoldState(
-    val scene: String = "",
-    val answer: String = "",
-    val riskNote: String = "",
-    /** AI 反推出的 Q 候选，用户可编辑/删除。 */
-    val questionDrafts: List<String> = emptyList(),
-    /** 当前正在调 LLM 生成 Q 候选 */
-    val generating: Boolean = false,
-    /** 当前正在保存到本地金标库（embedding + 持久化） */
-    val saving: Boolean = false,
-    /** 提示消息（用于错误提示等） */
-    val errorMessage: String? = null,
 )
 
 /** 暂存最近一次生成的输入，便于用户在结果页选择"结合 AI 重跑"。 */
@@ -112,14 +94,8 @@ class PanelViewModel(
     // 每次开新生成前先取消上一个，保证只有最新一次的回调能写入状态。
     private var generateJob: Job? = null
 
-    // 已加载过的语料库内存缓存：账号来回切换时不再重复读盘 + 解析 JSON。
-    // 任何写入 LocalGoldStore 或 corpus sync 后必须 invalidate 对应账号的 entry。
     private val corpusCache = mutableMapOf<BusinessAccount, List<Pair<QAItem, FloatArray>>>()
-
-    // 这几个 service 之前在 loadCorpus / autoSyncCorpus / syncCorpus 里各 new 一份，
-    // 提到字段共用一个实例，省构造和重复 mkdirs 检查。
     private val corpusSyncManager = CorpusSyncManager(appContext)
-    private val localGoldStore = LocalGoldStore(appContext)
     private val qaCorpusLoader = QACorpusLoader(appContext)
 
     private fun invalidateCorpusCache(account: BusinessAccount) {
@@ -273,189 +249,13 @@ class PanelViewModel(
         }
     }
 
-    /**
-     * 一键把当前账号所有本地金标推到云端。
-     * 历史本地金标（v1.0.5 之前加的）从未上云，这个按钮提供一次性回溯。
-     * 按 (scene, answer, risk_note) 分组，把 questions 合并后用 FC upsert 协议提交，
-     * 重叠的会替换合并 questions，新的就追加。
-     */
-    fun pushAllLocalGoldToCloud() {
-        if (!GoldUploader.isConfigured()) {
-            showSnackbar("未配置上传地址")
-            return
-        }
-        val account = _state.value.account
-        viewModelScope.launch {
-            val all = LocalGoldStore(appContext).load(account)
-            if (all.isEmpty()) {
-                showSnackbar("本地没有金标，无需回溯")
-                return@launch
-            }
-            // 按 (scene, answer, risk_note) 分组，questions 去重合并
-            data class Key(val scene: String, val answer: String, val risk: String)
-            val grouped = LinkedHashMap<Key, LinkedHashSet<String>>()
-            all.forEach { (item, _) ->
-                val q = item.questions.firstOrNull()?.trim().orEmpty()
-                if (q.isEmpty()) return@forEach
-                val k = Key(item.scene.ifBlank { "其他" }, item.answer, item.riskNote)
-                grouped.getOrPut(k) { LinkedHashSet() }.add(q)
-            }
-            val total = grouped.size
-            var ok = 0
-            var failed = 0
-            grouped.entries.forEachIndexed { idx, (key, qs) ->
-                _state.update { it.copy(snackbar = "回溯本地金标到云端：${idx + 1}/$total…") }
-                when (GoldUploader.upload(
-                    account = account,
-                    scene = key.scene,
-                    questions = qs.toList(),
-                    answer = key.answer,
-                    riskNote = key.risk,
-                )) {
-                    is GoldUploader.Result.Success -> ok++
-                    is GoldUploader.Result.Failure -> failed++
-                }
-            }
-            _state.update {
-                it.copy(snackbar = "回溯完成：成功 $ok 组，失败 $failed 组（共 $total 组）")
-            }
-        }
-    }
-
     private suspend fun loadSnippets(account: BusinessAccount) {
         val list = SnippetRepository(appContext).load(account)
         _state.update { it.copy(snippets = list) }
         android.util.Log.d("PanelViewModel", "常用片段加载完成 [${account.key}]: ${list.size} 条")
     }
 
-    // ─── 添加金标 QA 流程 ──────────────────────────────────────────
-
-    fun updateGoldScene(text: String) {
-        _state.update { it.copy(addGold = it.addGold.copy(scene = text, errorMessage = null)) }
-    }
-
-    fun updateGoldAnswer(text: String) {
-        _state.update { it.copy(addGold = it.addGold.copy(answer = text, errorMessage = null)) }
-    }
-
-    fun updateGoldRiskNote(text: String) {
-        _state.update { it.copy(addGold = it.addGold.copy(riskNote = text)) }
-    }
-
-    fun updateGoldDraft(index: Int, text: String) {
-        _state.update { st ->
-            val list = st.addGold.questionDrafts.toMutableList()
-            if (index in list.indices) list[index] = text
-            st.copy(addGold = st.addGold.copy(questionDrafts = list))
-        }
-    }
-
-    fun removeGoldDraft(index: Int) {
-        _state.update { st ->
-            val list = st.addGold.questionDrafts.toMutableList()
-            if (index in list.indices) list.removeAt(index)
-            st.copy(addGold = st.addGold.copy(questionDrafts = list))
-        }
-    }
-
-    fun addGoldDraftBlank() {
-        _state.update { st -> st.copy(addGold = st.addGold.copy(questionDrafts = st.addGold.questionDrafts + "")) }
-    }
-
-    fun resetGoldForm() {
-        _state.update { it.copy(addGold = AddGoldState()) }
-    }
-
-    /** 让 LLM 根据当前表单的 scene+answer 反推 Q 变体，写入 questionDrafts。 */
-    fun generateGoldQuestionVariants() {
-        val current = _state.value.addGold
-        if (current.answer.isBlank()) {
-            _state.update { it.copy(addGold = it.addGold.copy(errorMessage = "请先填写标准回复")) }
-            return
-        }
-        _state.update { it.copy(addGold = it.addGold.copy(generating = true, errorMessage = null)) }
-        viewModelScope.launch {
-            val list = aiRepository.generateQuestionVariants(
-                scene = current.scene,
-                answer = current.answer,
-                apiKey = AppConfig.API_KEY,
-                baseUrl = AppConfig.API_BASE_URL,
-            )
-            _state.update { st ->
-                st.copy(addGold = st.addGold.copy(
-                    generating = false,
-                    questionDrafts = list,
-                    errorMessage = if (list.isEmpty()) "AI 未返回结果，请检查网络或重试" else null,
-                ))
-            }
-        }
-    }
-
-    /** 把当前表单的 (Q1..Qn, A) 写入本地金标库，立即生效到 VectorStore。 */
-    fun saveGoldToLocal() {
-        val current = _state.value.addGold
-        val account = _state.value.account
-        val cleanQs = current.questionDrafts.map { it.trim() }.filter { it.isNotEmpty() }
-        if (current.answer.isBlank()) {
-            _state.update { it.copy(addGold = it.addGold.copy(errorMessage = "请先填写标准回复")) }
-            return
-        }
-        if (cleanQs.isEmpty()) {
-            _state.update { it.copy(addGold = it.addGold.copy(errorMessage = "至少需要一个 Q 变体（请生成或手动添加）")) }
-            return
-        }
-        _state.update { it.copy(addGold = it.addGold.copy(saving = true, errorMessage = null)) }
-        viewModelScope.launch {
-            // 1) 调 embedding API 给每个 Q 取向量
-            val vecs = embeddingRepository.embedBatch(cleanQs, AppConfig.API_KEY, AppConfig.API_BASE_URL)
-            if (vecs == null || vecs.size != cleanQs.size) {
-                _state.update { it.copy(addGold = it.addGold.copy(saving = false, errorMessage = "Embedding 失败，请检查网络")) }
-                return@launch
-            }
-            // 2) 构造条目（每个 Q 一条 QAItem，共享同 answer）
-            val sceneFinal = current.scene.ifBlank { "其他" }
-            val entries = cleanQs.zip(vecs).map { (q, vec) ->
-                com.xingshu.helper.data.model.QAItem(
-                    scene = sceneFinal,
-                    questions = listOf(q),
-                    answer = current.answer,
-                    riskNote = current.riskNote,
-                    isGold = true,
-                ) to vec
-            }
-            // 3) 持久化 + 立刻 push 到 VectorStore
-            localGoldStore.append(account, entries)
-            vectorStore.appendEntries(entries)
-            invalidateCorpusCache(account)
-
-            // 4) 自动同步到云端（让其他设备也能用）。失败不影响本地保存。
-            val cloudMsg = if (GoldUploader.isConfigured()) {
-                when (val r = GoldUploader.upload(
-                    account = account,
-                    scene = sceneFinal,
-                    questions = cleanQs,
-                    answer = current.answer,
-                    riskNote = current.riskNote,
-                )) {
-                    is GoldUploader.Result.Success -> "，已同步到云端"
-                    is GoldUploader.Result.Failure -> "，云端同步失败：${r.message}（仅本地生效）"
-                }
-            } else ""
-
-            _state.update { st ->
-                st.copy(
-                    addGold = AddGoldState(),
-                    currentScreen = PanelScreen.MAIN,
-                    snackbar = "已加入金标库（${cleanQs.size} 条 Q），立即生效$cloudMsg",
-                )
-            }
-        }
-    }
-
-    /**
-     * 用户在 RAG 结果页编辑某条 QA 的 A，写入本地金标库并立即生效。
-     * 复用原向量（question 没变），不调 embedding API。
-     */
+    /** 用户在 RAG 结果页编辑某条 QA 的 A，内存立即生效，同步上传云端。 */
     fun updateRagAnswer(originalItem: QAItem, newAnswer: String, newRiskNote: String = originalItem.riskNote) {
         val account = _state.value.account
         val question = originalItem.questions.firstOrNull().orEmpty()
@@ -469,24 +269,10 @@ class PanelViewModel(
             showSnackbar("找不到原向量，无法保存")
             return
         }
-        val updated = originalItem.copy(
-            answer = cleanAnswer,
-            riskNote = newRiskNote,
-            isGold = true,    // 修订即视为金标
-            isLocal = true,
-        )
+        val updated = originalItem.copy(answer = cleanAnswer, riskNote = newRiskNote)
         viewModelScope.launch {
-            localGoldStore.upsert(
-                account = account,
-                question = question,
-                scene = updated.scene,
-                answer = updated.answer,
-                riskNote = updated.riskNote,
-                embedding = vec,
-            )
             vectorStore.upsertByQuestion(question, updated, vec)
             invalidateCorpusCache(account)
-            // 同步更新当前 referencedQas 中匹配的那条，UI 立刻看到新 A
             _state.update { st ->
                 st.copy(
                     referencedQas = st.referencedQas.map { ref ->
@@ -495,7 +281,6 @@ class PanelViewModel(
                     snackbar = "已保存修订（立即生效）",
                 )
             }
-            // 同步上传到云端（FC 按 question 替换；网络失败仅 snackbar 提示，不阻塞）
             if (GoldUploader.isConfigured()) {
                 val r = GoldUploader.upload(
                     account = account,
@@ -510,119 +295,14 @@ class PanelViewModel(
                 }
                 _state.update { it.copy(snackbar = msg) }
             }
-            // 如果当前结果页用的是 GeneratedResult.ragMatches（RAG-only 模式），
-            // 也把对应 RagMatch 的 answer 替换掉，UI 立刻看到新版本
             val cur = _state.value.generateState
             if (cur is GenerateState.Success && cur.result.isDirectMatch) {
                 val updatedMatches = cur.result.ragMatches.map { rm ->
-                    // RagMatch 没有 question 字段——用 scene+answer 匹配旧值（足够区分 top-K）
-                    if (rm.scene == originalItem.scene && rm.answer == originalItem.answer) {
-                        rm.copy(answer = updated.answer)
-                    } else rm
+                    if (rm.scene == originalItem.scene && rm.answer == originalItem.answer) rm.copy(answer = updated.answer) else rm
                 }
                 _state.update { st ->
                     st.copy(generateState = GenerateState.Success(cur.result.copy(ragMatches = updatedMatches)))
                 }
-            }
-        }
-    }
-
-    /**
-     * 将 RAG 结果中的某条 QA 升级为金标：写入本地金标库（assets 来源条目会被复制一份），
-     * 内存里翻转 isGold 标志，UI 立即把这条置顶到第一位并打金标角标。
-     * 如果之前被用户取消过金标（在 demoted 列表里），仅清掉 demoted 标记即可。
-     */
-    fun promoteToGold(item: QAItem) {
-        val account = _state.value.account
-        val question = item.questions.firstOrNull().orEmpty()
-        if (question.isBlank()) {
-            showSnackbar("无法识别该条目的 question")
-            return
-        }
-        val vec = vectorStore.vectorForQuestion(question)
-        if (vec == null) {
-            showSnackbar("找不到原向量，无法升级金标")
-            return
-        }
-        viewModelScope.launch {
-            val store = localGoldStore
-            val demoted = store.loadDemoted(account)
-            if (question in demoted) {
-                // 之前被降级过，撤销即可恢复金标 boost
-                store.removeDemoted(account, question)
-            } else if (!item.isLocal) {
-                // assets 非金标条目，复制一份到本地金标 store
-                store.promote(
-                    account = account,
-                    question = question,
-                    scene = item.scene,
-                    answer = item.answer,
-                    riskNote = item.riskNote,
-                    embedding = vec,
-                )
-            }
-            vectorStore.setGoldByQuestion(question, true)
-            invalidateCorpusCache(account)
-            applyGoldFlagToState(question, true)
-            showSnackbar("已设为金标，已置顶并下次检索继续生效")
-        }
-    }
-
-    /**
-     * 将某条 QA 取消金标：写入 demoted 列表（同时清掉本地金标 store 里的对应行），
-     * VectorStore 内存中 isGold 翻 false，UI 移除该条的角标和置顶。
-     */
-    fun demoteFromGold(item: QAItem) {
-        val account = _state.value.account
-        val question = item.questions.firstOrNull().orEmpty()
-        if (question.isBlank()) {
-            showSnackbar("无法识别该条目的 question")
-            return
-        }
-        viewModelScope.launch {
-            localGoldStore.addDemoted(account, question)
-            vectorStore.setGoldByQuestion(question, false)
-            invalidateCorpusCache(account)
-            applyGoldFlagToState(question, false)
-            showSnackbar("已取消金标")
-        }
-    }
-
-    /**
-     * 翻转 state 中 question 对应条目的 isGold 标志：
-     * - RAG-only 结果页（ragMatches 与 referencedQas 索引对齐）：同步两边、稳定排序金标置顶。
-     * - 其它情况：只更新 referencedQas，避免动 ragMatches 索引。
-     */
-    private fun applyGoldFlagToState(question: String, isGold: Boolean) {
-        _state.update { st ->
-            val cur = st.generateState
-            if (cur is GenerateState.Success
-                && cur.result.isDirectMatch
-                && st.referencedQas.size == cur.result.ragMatches.size
-            ) {
-                val zipped = cur.result.ragMatches.zip(st.referencedQas).map { (rm, ref) ->
-                    val q = ref.item.questions.firstOrNull()
-                    if (q == question) {
-                        rm.copy(isGold = isGold) to ref.copy(item = ref.item.copy(isGold = isGold))
-                    } else rm to ref
-                }
-                val sorted = zipped.withIndex().sortedWith(
-                    compareByDescending<IndexedValue<Pair<RagMatch, ReferencedQa>>> { it.value.first.isGold }
-                        .thenBy { it.index }
-                ).map { it.value }
-                st.copy(
-                    generateState = GenerateState.Success(
-                        cur.result.copy(ragMatches = sorted.map { it.first })
-                    ),
-                    referencedQas = sorted.map { it.second },
-                )
-            } else {
-                val newRefs = st.referencedQas.map { ref ->
-                    if (ref.item.questions.firstOrNull() == question) {
-                        ref.copy(item = ref.item.copy(isGold = isGold))
-                    } else ref
-                }
-                st.copy(referencedQas = newRefs)
             }
         }
     }
@@ -773,7 +453,7 @@ class PanelViewModel(
             return
         }
         val ragMatches = matches.map { (item, score) ->
-            RagMatch(scene = item.scene, answer = item.answer, score = score, isGold = item.isGold)
+            RagMatch(scene = item.scene, answer = item.answer, score = score)
         }
         collectGenerateState(GenerateState.Success(GeneratedResult(isDirectMatch = true, ragMatches = ragMatches)))
     }
@@ -789,11 +469,8 @@ class PanelViewModel(
             return emptyList()
         }
         val hits = vectorStore.search(queryVec, topK = 5)
-        // 稳定排序：金标条目永远排在最前，非金标按原 boosted 顺序保留
-        val sorted = hits.sortedByDescending { (item, _) -> item.isGold }
-        // 把检索结果（带分数）写入 state，RAG+AI 模式下结果页展示「参考话术」面板
-        _state.update { it.copy(referencedQas = sorted.map { (item, score) -> ReferencedQa(item, score) }) }
-        return sorted
+        _state.update { it.copy(referencedQas = hits.map { (item, score) -> ReferencedQa(item, score) }) }
+        return hits
     }
 
     private suspend fun retrieveContext(query: String): List<QAItem> {

@@ -103,12 +103,6 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                                         viewModel.updateRagAnswer(sourceItem, newAnswer, newRiskNote)
                                     }
                                 },
-                                onToggleGold = {
-                                    if (sourceItem != null) {
-                                        if (match.isGold) viewModel.demoteFromGold(sourceItem)
-                                        else viewModel.promoteToGold(sourceItem)
-                                    }
-                                },
                             )
                         }
                     }
@@ -316,7 +310,6 @@ private fun RagMatchCard(
     copied: Boolean,
     onCopy: () -> Unit,
     onSave: (newAnswer: String, newRiskNote: String) -> Unit,
-    onToggleGold: () -> Unit,
 ) {
     var editing by remember { mutableStateOf(false) }
 
@@ -355,32 +348,9 @@ private fun RagMatchCard(
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (match.isGold) {
-                    Text(
-                        "★金标",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                }
-                if (sourceItem?.isLocal == true) {
-                    Text(
-                        "本地",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (sourceItem != null) {
-                    IconButton(onClick = onToggleGold, modifier = Modifier.size(28.dp)) {
-                        Text(
-                            text = if (match.isGold) "★" else "☆",
-                            fontSize = 18.sp,
-                            color = if (match.isGold) MaterialTheme.colorScheme.tertiary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                     IconButton(onClick = { editing = true }, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(16.dp))
                     }
@@ -566,15 +536,6 @@ private fun ReferenceSources(items: List<ReferencedQa>) {
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        if (q.isGold) {
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                "★金标",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.tertiary
-                            )
-                        }
                         Spacer(Modifier.width(6.dp))
                         Text(
                             "相似度 ${"%.2f".format(ref.score)}",

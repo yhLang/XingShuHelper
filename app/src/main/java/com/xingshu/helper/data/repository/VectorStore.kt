@@ -14,17 +14,6 @@ class VectorStore {
         entries = items.map { (item, vec) -> item to normalize(vec) }
     }
 
-    /** 运行时追加条目，例如用户在 App 里添加新金标 QA 后立即生效。 */
-    fun appendEntries(more: List<Pair<QAItem, FloatArray>>) {
-        if (more.isEmpty()) return
-        entries = entries + more.map { (item, vec) -> item to normalize(vec) }
-    }
-
-    /**
-     * 按 question 替换/追加为新本地条目。
-     * 同 question 的 assets 原版会被剔除——避免 RAG 召回同 question 的多份重复条目，
-     * 也确保按 question 维度的金标⭐操作不会"同步翻转"两条。
-     */
     fun upsertByQuestion(question: String, newItem: QAItem, newVec: FloatArray) {
         val filtered = entries.filterNot { (item, _) ->
             item.questions.firstOrNull() == question
@@ -39,16 +28,6 @@ class VectorStore {
     /** 找回 question 对应的 QAItem。用于升级金标时拿到原条目（assets 来源不可写但可读）。 */
     fun itemForQuestion(question: String): QAItem? =
         entries.firstOrNull { (item, _) -> item.questions.firstOrNull() == question }?.first
-
-    /** 内存里翻转 question 对应条目的 isGold 标志，立刻影响后续 search 排序，无需重 load corpus。 */
-    fun setGoldByQuestion(question: String, isGold: Boolean) {
-        val updated = entries.map { (item, vec) ->
-            if (item.questions.firstOrNull() == question && item.isGold != isGold) {
-                item.copy(isGold = isGold) to vec
-            } else item to vec
-        }
-        entries = updated
-    }
 
     fun search(query: FloatArray, topK: Int = 5): List<Pair<QAItem, Float>> {
         val snapshot = entries

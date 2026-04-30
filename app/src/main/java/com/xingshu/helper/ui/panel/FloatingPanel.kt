@@ -30,7 +30,6 @@ import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.service.CaptureCoordinator
-import com.xingshu.helper.ui.addgold.AddGoldContent
 import com.xingshu.helper.ui.result.ResultContent
 import com.xingshu.helper.ui.settings.SettingsContent
 import com.xingshu.helper.ui.snippets.SnippetsContent
@@ -62,13 +61,11 @@ fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
                         PanelScreen.RESULT -> "生成结果"
                         PanelScreen.SETTINGS -> "设置"
                         PanelScreen.SNIPPETS -> "常用片段"
-                        PanelScreen.ADD_GOLD -> "添加金标"
                     },
                     currentScreen = state.currentScreen,
                     onClose = onClose,
                     onSettings = { viewModel.navigateTo(PanelScreen.SETTINGS) },
                     onSnippets = { viewModel.navigateTo(PanelScreen.SNIPPETS) },
-                    onAddGold = { viewModel.navigateTo(PanelScreen.ADD_GOLD) },
                     onBack = { viewModel.navigateTo(PanelScreen.MAIN) }
                 )
 
@@ -84,10 +81,8 @@ fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
                             corpusSyncConfigured = com.xingshu.helper.BuildConfig.CORPUS_REPO.isNotBlank(),
                             onSwitchAccount = { viewModel.switchAccount(it) },
                             onSyncCorpus = { viewModel.syncCorpus() },
-                            onPushAllLocalGold = { viewModel.pushAllLocalGoldToCloud() },
                         )
                         PanelScreen.SNIPPETS -> SnippetsContent(snippets = state.snippets)
-                        PanelScreen.ADD_GOLD -> AddGoldContent(state = state.addGold, viewModel = viewModel)
                     }
 
                     state.snackbar?.let { msg ->
@@ -120,7 +115,6 @@ private fun PanelTopBar(
     onClose: () -> Unit,
     onSettings: () -> Unit,
     onSnippets: () -> Unit,
-    onAddGold: () -> Unit,
     onBack: () -> Unit
 ) {
     Row(
@@ -141,9 +135,6 @@ private fun PanelTopBar(
             fontSize = 17.sp
         )
         if (currentScreen == PanelScreen.MAIN) {
-            IconButton(onClick = onAddGold) {
-                Icon(Icons.Default.Add, contentDescription = "添加金标", modifier = Modifier.size(20.dp))
-            }
             IconButton(onClick = onSnippets) {
                 Icon(Icons.Default.Bookmark, contentDescription = "常用片段", modifier = Modifier.size(20.dp))
             }
