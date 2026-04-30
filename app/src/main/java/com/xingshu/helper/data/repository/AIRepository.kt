@@ -296,6 +296,7 @@ class AIRepository {
             runCatching { json.parseToJsonElement(text.substring(start, end + 1)) as? JsonObject }
                 .getOrNull()?.let { return it }
         }
+        android.util.Log.w("AIRepository", "extractJson 全部 fallback 失败，原文：${text.take(200)}")
         return null
     }
 

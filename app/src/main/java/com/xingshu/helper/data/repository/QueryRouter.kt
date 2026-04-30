@@ -13,10 +13,12 @@ object QueryRouter {
     )
 
     fun route(query: String): RouteType {
-        return if (structuredPatterns.any { it.containsMatchIn(query) }) {
+        val type = if (structuredPatterns.any { it.containsMatchIn(query) }) {
             RouteType.STRUCTURED
         } else {
             RouteType.TALK_SCRIPT
         }
+        android.util.Log.d("QueryRouter", "route=$type query=${query.take(60)}")
+        return type
     }
 }
