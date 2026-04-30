@@ -122,27 +122,38 @@ class WeChatAccessibilityProbe : AccessibilityService() {
             return null
         }
 
-        /** 调试：遍历节点，把可能是输入框的全打出来。 */
+        /** 调试：遍历节点，统计总数 + 打可能是输入框的节点。 */
         private fun AccessibilityNodeInfo.walkDump() {
-            val cls = className?.toString().orEmpty()
-            val interesting = isEditable ||
-                cls.contains("Edit", ignoreCase = true) ||
-                cls.contains("Input", ignoreCase = true) ||
-                cls.endsWith("TextView")  // 微信可能用 TextView 当输入框
-            if (interesting) {
-                val rect = android.graphics.Rect()
-                getBoundsInScreen(rect)
-                Log.w(
-                    TAG,
-                    "  cls=$cls id=${viewIdResourceName ?: "-"} editable=$isEditable " +
-                        "focused=$isFocused clickable=$isClickable " +
-                        "x=${rect.left}-${rect.right} y=${rect.top}-${rect.bottom} " +
-                        "text=\"${text?.toString()?.take(30)?.replace('\n', ' ')}\""
-                )
+            var total = 0
+            var interestingCount = 0
+            walkInternal { node ->
+                total++
+                val cls = node.className?.toString().orEmpty()
+                val interesting = node.isEditable ||
+                    cls.contains("Edit", ignoreCase = true) ||
+                    cls.contains("Input", ignoreCase = true) ||
+                    cls.endsWith("TextView")
+                if (interesting) {
+                    interestingCount++
+                    val rect = android.graphics.Rect()
+                    node.getBoundsInScreen(rect)
+                    Log.w(
+                        TAG,
+                        "  cls=$cls id=${node.viewIdResourceName ?: "-"} editable=${node.isEditable} " +
+                            "focused=${node.isFocused} clickable=${node.isClickable} " +
+                            "x=${rect.left}-${rect.right} y=${rect.top}-${rect.bottom} " +
+                            "text=\"${node.text?.toString()?.take(30)?.replace('\n', ' ')}\""
+                    )
+                }
             }
+            Log.w(TAG, "[DUMP] total nodes in wechat window=$total, interesting=$interestingCount")
+        }
+
+        private fun AccessibilityNodeInfo.walkInternal(visit: (AccessibilityNodeInfo) -> Unit) {
+            visit(this)
             for (i in 0 until childCount) {
                 val child = getChild(i) ?: continue
-                child.walkDump()
+                child.walkInternal(visit)
                 child.recycle()
             }
         }
