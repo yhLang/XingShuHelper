@@ -493,29 +493,37 @@ class PanelViewModel(
      * 永远跑不到。
      */
     fun fillReplyToWeChat(text: String) {
+        android.util.Log.i("PanelViewModel", "fillReplyToWeChat entered, text=${text.take(30)}")
         viewModelScope.launch {
-            val launchIntent = appContext.packageManager
-                .getLaunchIntentForPackage("com.tencent.mm")
-                ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (launchIntent == null) {
-                showSnackbar("未找到微信，已复制到剪贴板")
-                return@launch
+            try {
+                android.util.Log.i("PanelViewModel", "coroutine started")
+                val launchIntent = appContext.packageManager
+                    .getLaunchIntentForPackage("com.tencent.mm")
+                    ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                android.util.Log.i("PanelViewModel", "launchIntent=$launchIntent")
+                if (launchIntent == null) {
+                    showSnackbar("未找到微信，已复制到剪贴板")
+                    return@launch
+                }
+                appContext.startActivity(launchIntent)
+                android.util.Log.i("PanelViewModel", "startActivity called, waiting 800ms")
+                kotlinx.coroutines.delay(800)
+                val result = com.xingshu.helper.service.WeChatAccessibilityProbe.fillReplyToWeChat(text)
+                android.util.Log.d("PanelViewModel", "fillReplyToWeChat result=$result")
+                val msg = when (result) {
+                    com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.Success ->
+                        "已填入微信"
+                    com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.InputBoxNotFound ->
+                        "请打开具体对话页后长按粘贴（已复制）"
+                    com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.NotInWeChat ->
+                        "微信未在前台，请打开后长按粘贴（已复制）"
+                    else -> "填入失败，请长按粘贴（已复制）"
+                }
+                showSnackbar(msg)
+            } catch (t: Throwable) {
+                android.util.Log.e("PanelViewModel", "fillReplyToWeChat crashed", t)
+                showSnackbar("填入异常：${t.message ?: t.javaClass.simpleName}")
             }
-            appContext.startActivity(launchIntent)
-            // 等微信前台渲染。800ms 是经验值：太短输入框还没绑，太长用户感觉卡
-            kotlinx.coroutines.delay(800)
-            val result = com.xingshu.helper.service.WeChatAccessibilityProbe.fillReplyToWeChat(text)
-            android.util.Log.d("PanelViewModel", "fillReplyToWeChat result=$result")
-            val msg = when (result) {
-                com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.Success ->
-                    "已填入微信"
-                com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.InputBoxNotFound ->
-                    "请打开具体对话页后长按粘贴（已复制）"
-                com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.NotInWeChat ->
-                    "微信未在前台，请打开后长按粘贴（已复制）"
-                else -> "填入失败，请长按粘贴（已复制）"
-            }
-            showSnackbar(msg)
         }
     }
 
