@@ -21,6 +21,7 @@ fun SettingsContent(
     corpusSyncConfigured: Boolean,
     onSwitchAccount: (BusinessAccount) -> Unit,
     onSyncCorpus: () -> Unit,
+    onPushAllLocalGold: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -60,6 +61,15 @@ fun SettingsContent(
                 state = corpusSync,
                 onCheck = onSyncCorpus,
             )
+            Text(
+                "v1.0.5 之前添加的本地金标没自动上过云，点下面按钮一次性回传到云端，让其他设备也能用。",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 16.sp,
+            )
+            OutlinedButton(onClick = onPushAllLocalGold, modifier = Modifier.fillMaxWidth()) {
+                Text("一键回溯本地金标到云", fontSize = 12.sp)
+            }
         }
 
         HorizontalDivider()

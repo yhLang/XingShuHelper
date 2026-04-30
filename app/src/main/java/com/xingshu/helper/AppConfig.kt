@@ -5,6 +5,6 @@ internal object AppConfig {
     // 注意：BuildConfig 字段非编译期常量，因此这里用 val 而不是 const val
     val API_KEY: String = BuildConfig.DASHSCOPE_API_KEY
     const val API_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    const val CHAT_MODEL = "qwen-plus"
+    const val CHAT_MODEL = "deepseek-v4-flash"
     const val VISION_MODEL = "qwen-vl-max"
 }

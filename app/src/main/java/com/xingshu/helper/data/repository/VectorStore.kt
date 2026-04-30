@@ -66,8 +66,10 @@ class VectorStore {
     }
 
     companion object {
-        /** 最低相似度阈值。低于此视为"语料库未覆盖"，不返回噪声结果。 */
-        private const val MIN_SCORE = 0.75f
+        /** 最低相似度阈值。低于此视为"语料库未覆盖"，不返回噪声结果。
+         *  0.6 是宽松档：放过更多语义近的（如「写字班多少钱」匹配到「学费多少」），
+         *  弱相关由后续 AI fallback 兜底，比硬 miss 体验好。 */
+        private const val MIN_SCORE = 0.6f
     }
 
     /**

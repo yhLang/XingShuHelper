@@ -165,15 +165,17 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                     item { ReferenceSources(items = state.referencedQas) }
                 }
 
-                // RAG-only 结果不满意时，可以基于这批检索结果再调 LLM 生成三版回复
-                if (result.isDirectMatch) {
-                    item {
-                        Button(
-                            onClick = { viewModel.generateWithAi() },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("结果不满意？结合 AI 生成", fontSize = 14.sp)
-                        }
+                // 不满意时再调一次 LLM：RAG-only 是首次结合 AI，AI-combined 是再来一版
+                item {
+                    Button(
+                        onClick = { viewModel.generateWithAi() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (result.isDirectMatch) "结果不满意？结合 AI 生成"
+                            else "再来一版（重新生成）",
+                            fontSize = 14.sp
+                        )
                     }
                 }
 

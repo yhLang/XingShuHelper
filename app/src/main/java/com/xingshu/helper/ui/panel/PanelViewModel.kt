@@ -273,6 +273,55 @@ class PanelViewModel(
         }
     }
 
+    /**
+     * 一键把当前账号所有本地金标推到云端。
+     * 历史本地金标（v1.0.5 之前加的）从未上云，这个按钮提供一次性回溯。
+     * 按 (scene, answer, risk_note) 分组，把 questions 合并后用 FC upsert 协议提交，
+     * 重叠的会替换合并 questions，新的就追加。
+     */
+    fun pushAllLocalGoldToCloud() {
+        if (!GoldUploader.isConfigured()) {
+            showSnackbar("未配置上传地址")
+            return
+        }
+        val account = _state.value.account
+        viewModelScope.launch {
+            val all = LocalGoldStore(appContext).load(account)
+            if (all.isEmpty()) {
+                showSnackbar("本地没有金标，无需回溯")
+                return@launch
+            }
+            // 按 (scene, answer, risk_note) 分组，questions 去重合并
+            data class Key(val scene: String, val answer: String, val risk: String)
+            val grouped = LinkedHashMap<Key, LinkedHashSet<String>>()
+            all.forEach { (item, _) ->
+                val q = item.questions.firstOrNull()?.trim().orEmpty()
+                if (q.isEmpty()) return@forEach
+                val k = Key(item.scene.ifBlank { "其他" }, item.answer, item.riskNote)
+                grouped.getOrPut(k) { LinkedHashSet() }.add(q)
+            }
+            val total = grouped.size
+            var ok = 0
+            var failed = 0
+            grouped.entries.forEachIndexed { idx, (key, qs) ->
+                _state.update { it.copy(snackbar = "回溯本地金标到云端：${idx + 1}/$total…") }
+                when (GoldUploader.upload(
+                    account = account,
+                    scene = key.scene,
+                    questions = qs.toList(),
+                    answer = key.answer,
+                    riskNote = key.risk,
+                )) {
+                    is GoldUploader.Result.Success -> ok++
+                    is GoldUploader.Result.Failure -> failed++
+                }
+            }
+            _state.update {
+                it.copy(snackbar = "回溯完成：成功 $ok 组，失败 $failed 组（共 $total 组）")
+            }
+        }
+    }
+
     private suspend fun loadSnippets(account: BusinessAccount) {
         val list = SnippetRepository(appContext).load(account)
         _state.update { it.copy(snippets = list) }

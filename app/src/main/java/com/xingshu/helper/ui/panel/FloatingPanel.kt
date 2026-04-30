@@ -83,6 +83,7 @@ fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
                         corpusSyncConfigured = com.xingshu.helper.BuildConfig.CORPUS_REPO.isNotBlank(),
                         onSwitchAccount = { viewModel.switchAccount(it) },
                         onSyncCorpus = { viewModel.syncCorpus() },
+                        onPushAllLocalGold = { viewModel.pushAllLocalGoldToCloud() },
                     )
                     PanelScreen.SNIPPETS -> SnippetsContent(snippets = state.snippets)
                     PanelScreen.ADD_GOLD -> AddGoldContent(state = state.addGold, viewModel = viewModel)
