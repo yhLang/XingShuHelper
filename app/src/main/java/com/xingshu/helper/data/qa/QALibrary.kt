@@ -124,9 +124,15 @@ object QALibrary {
     val systemPrompt: String = buildPrompt(items)
 
     // 输出 schema 已由 AIRepository 的 tool calling 强制约束，prompt 里不再重复说明。
-    fun buildPrompt(contextItems: List<QAItem>): String = buildString {
+    fun buildPrompt(contextItems: List<QAItem>, structuredContext: String = ""): String = buildString {
         appendLine(ROLE_INSTRUCTION)
         appendLine()
+        if (structuredContext.isNotBlank()) {
+            appendLine("## 当期课程结构化数据（价格、时段以此为准，回答时直接引用）")
+            appendLine()
+            appendLine(structuredContext.trimEnd())
+            appendLine()
+        }
         if (contextItems.isNotEmpty()) {
             appendLine("## 标准话术（请优先采用其措辞、长度和语气）")
             appendLine()

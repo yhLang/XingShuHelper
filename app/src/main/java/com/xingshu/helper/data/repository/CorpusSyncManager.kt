@@ -40,6 +40,7 @@ class CorpusSyncManager(private val context: Context) {
     data class Files(
         @SerialName("texts") val texts: FileEntry,
         @SerialName("embeddings") val embeddings: FileEntry,
+        @SerialName("structured") val structured: FileEntry? = null,
     )
 
     @Serializable
@@ -68,6 +69,9 @@ class CorpusSyncManager(private val context: Context) {
 
     fun localEmbeddingsFile(account: BusinessAccount): File =
         File(corpusDir(account), "qa_${account.key}_embeddings.bin")
+
+    fun localStructuredFile(account: BusinessAccount): File =
+        File(corpusDir(account), "structured_${account.key}.txt")
 
     private fun localManifestFile(account: BusinessAccount): File =
         File(corpusDir(account), "manifest.json")
@@ -141,6 +145,18 @@ class CorpusSyncManager(private val context: Context) {
             listener(State.Error("文件替换失败（磁盘空间不足或跨分区）"))
             return@withContext false
         }
+        // 可选：结构化知识库文件（manifest 无此字段时跳过，不影响主流程）
+        manifest.files.structured?.let { entry ->
+            val structuredTmp = File(corpusDir(account), "structured.tmp")
+            val structOk = downloadTo(rawUrl(entry.path), structuredTmp, entry.size, entry.sha256) {}
+            if (structOk) {
+                structuredTmp.renameTo(localStructuredFile(account))
+            } else {
+                structuredTmp.delete()
+                android.util.Log.w("CorpusSync", "结构化知识库下载失败，继续使用 assets 版本")
+            }
+        }
+
         localManifestFile(account).writeText(json.encodeToString(Manifest.serializer(), manifest))
 
         listener(State.Updated(manifest.version, manifest.count))

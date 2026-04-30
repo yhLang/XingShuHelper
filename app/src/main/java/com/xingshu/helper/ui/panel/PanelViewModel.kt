@@ -21,9 +21,9 @@ import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
 import com.xingshu.helper.data.repository.CorpusSyncManager
 import com.xingshu.helper.data.repository.EmbeddingRepository
-import com.xingshu.helper.data.repository.GoldUploader
 import com.xingshu.helper.data.repository.QACorpusLoader
 import com.xingshu.helper.data.repository.SnippetRepository
+import com.xingshu.helper.data.repository.StructuredKnowledgeBase
 import com.xingshu.helper.data.repository.VectorStore
 import com.xingshu.helper.data.repository.VisionRepository
 import com.xingshu.helper.service.CaptureCoordinator
@@ -97,6 +97,9 @@ class PanelViewModel(
     private val corpusCache = mutableMapOf<BusinessAccount, List<Pair<QAItem, FloatArray>>>()
     private val corpusSyncManager = CorpusSyncManager(appContext)
     private val qaCorpusLoader = QACorpusLoader(appContext)
+    private val structuredKb = StructuredKnowledgeBase(appContext)
+
+    private var currentStructuredContext: String = ""
 
     private fun invalidateCorpusCache(account: BusinessAccount) {
         corpusCache.remove(account)
@@ -199,6 +202,8 @@ class PanelViewModel(
             _state.update { it.copy(corpusReady = true, corpusVersion = version) }
             val src = if (cached != null) "缓存" else "磁盘"
             android.util.Log.d("PanelViewModel", "RAG 语料库加载完成 [${account.key}]: ${corpus.size} 条（来自$src），本地金标版本 $version")
+            currentStructuredContext = structuredKb.load(account)
+            android.util.Log.d("PanelViewModel", "结构化知识库加载完成 [${account.key}]: ${currentStructuredContext.length} 字符")
             // 后台自动同步：拉到新版本静默 reload，UI 用 snackbar 提示
             autoSyncCorpus(account)
         } catch (e: Exception) {
@@ -221,6 +226,7 @@ class PanelViewModel(
                     val corpus = qaCorpusLoader.load(account)
                     corpusCache[account] = corpus
                     vectorStore.initialize(corpus)
+                    currentStructuredContext = structuredKb.load(account)
                     _state.update {
                         it.copy(
                             corpusVersion = finalState.version,
@@ -253,58 +259,6 @@ class PanelViewModel(
         val list = SnippetRepository(appContext).load(account)
         _state.update { it.copy(snippets = list) }
         android.util.Log.d("PanelViewModel", "常用片段加载完成 [${account.key}]: ${list.size} 条")
-    }
-
-    /** 用户在 RAG 结果页编辑某条 QA 的 A，内存立即生效，同步上传云端。 */
-    fun updateRagAnswer(originalItem: QAItem, newAnswer: String, newRiskNote: String = originalItem.riskNote) {
-        val account = _state.value.account
-        val question = originalItem.questions.firstOrNull().orEmpty()
-        val cleanAnswer = newAnswer.trim()
-        if (question.isBlank() || cleanAnswer.isBlank()) {
-            showSnackbar("question 或 answer 不能为空")
-            return
-        }
-        val vec = vectorStore.vectorForQuestion(question)
-        if (vec == null) {
-            showSnackbar("找不到原向量，无法保存")
-            return
-        }
-        val updated = originalItem.copy(answer = cleanAnswer, riskNote = newRiskNote)
-        viewModelScope.launch {
-            vectorStore.upsertByQuestion(question, updated, vec)
-            invalidateCorpusCache(account)
-            _state.update { st ->
-                st.copy(
-                    referencedQas = st.referencedQas.map { ref ->
-                        if (ref.item.questions.firstOrNull() == question) ref.copy(item = updated) else ref
-                    },
-                    snackbar = "已保存修订（立即生效）",
-                )
-            }
-            if (GoldUploader.isConfigured()) {
-                val r = GoldUploader.upload(
-                    account = account,
-                    scene = updated.scene,
-                    questions = listOf(question),
-                    answer = updated.answer,
-                    riskNote = updated.riskNote,
-                )
-                val msg = when (r) {
-                    is GoldUploader.Result.Success -> "已保存修订（立即生效），已同步到云端"
-                    is GoldUploader.Result.Failure -> "已保存修订（立即生效），云端同步失败：${r.message}"
-                }
-                _state.update { it.copy(snackbar = msg) }
-            }
-            val cur = _state.value.generateState
-            if (cur is GenerateState.Success && cur.result.isDirectMatch) {
-                val updatedMatches = cur.result.ragMatches.map { rm ->
-                    if (rm.scene == originalItem.scene && rm.answer == originalItem.answer) rm.copy(answer = updated.answer) else rm
-                }
-                _state.update { st ->
-                    st.copy(generateState = GenerateState.Success(cur.result.copy(ragMatches = updatedMatches)))
-                }
-            }
-        }
     }
 
     fun switchAccount(account: BusinessAccount) {
@@ -436,10 +390,12 @@ class PanelViewModel(
         generateJob = viewModelScope.launch {
             when (query) {
                 is LastQuery.Messages -> aiRepository.generate(
-                    query.messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
+                    query.messages, AppConfig.API_KEY, AppConfig.API_BASE_URL,
+                    contextItems, currentStructuredContext
                 ).collect { collectGenerateState(it) }
                 is LastQuery.Dialog -> aiRepository.generateFromDialog(
-                    query.dialog, AppConfig.API_KEY, AppConfig.API_BASE_URL, contextItems
+                    query.dialog, AppConfig.API_KEY, AppConfig.API_BASE_URL,
+                    contextItems, currentStructuredContext
                 ).collect { collectGenerateState(it) }
             }
         }
