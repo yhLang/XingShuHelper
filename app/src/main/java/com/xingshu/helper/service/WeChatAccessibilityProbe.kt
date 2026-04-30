@@ -68,7 +68,10 @@ class WeChatAccessibilityProbe : AccessibilityService() {
         if (!verbose) return
 
         val title = root.findTitle().orEmpty()
-        val bubbles = root.collectBubbles()
+        val dm = resources.displayMetrics
+        val screenW = dm.widthPixels
+        val screenH = dm.heightPixels
+        val bubbles = root.collectBubbles(screenW, screenH)
         val customerCount = bubbles.count { it.role == Role.CUSTOMER }
         val meCount = bubbles.count { it.role == Role.ME }
         val unknownCount = bubbles.count { it.role == Role.UNKNOWN }
@@ -77,7 +80,7 @@ class WeChatAccessibilityProbe : AccessibilityService() {
             TAG,
             "[CONTENT] #$contentEventCount title=\"$title\" bubbles=${bubbles.size} " +
                 "customer=$customerCount me=$meCount unknown=$unknownCount " +
-                "screen=${root.windowWidth()}x${root.windowHeight()}"
+                "screen=${screenW}x${screenH}"
         )
 
         // 详细模式：打印最后 3 条气泡的 role + 文本前 30 字 + 横坐标，方便判断左右识别准不准
@@ -125,10 +128,15 @@ class WeChatAccessibilityProbe : AccessibilityService() {
      *   - 屏幕中线偏左（< 45%）→ CUSTOMER
      *   - 屏幕中线偏右（> 55%）→ ME
      *   - 中间 → UNKNOWN（系统提示 / 时间戳 / 撤回提示）
+     *
+     * 屏幕尺寸由调用方传入（用 Resources.displayMetrics 拿，比 root.getBoundsInScreen 可靠）。
      */
-    private fun AccessibilityNodeInfo.collectBubbles(): List<Bubble> {
-        val screenW = windowWidth().takeIf { it > 0 } ?: return emptyList()
+    private fun AccessibilityNodeInfo.collectBubbles(screenW: Int, screenH: Int): List<Bubble> {
+        if (screenW <= 0) return emptyList()
         val out = mutableListOf<Bubble>()
+        // 顶部 ActionBar 大约前 12% 高度，底部输入栏大约后 18%（含键盘弹起前的输入区）
+        val topExclude = (screenH * 0.12).toInt()
+        val bottomExclude = (screenH * 0.82).toInt()
         walk { node ->
             val cls = node.className?.toString().orEmpty()
             if (!cls.endsWith("TextView")) return@walk
@@ -136,10 +144,8 @@ class WeChatAccessibilityProbe : AccessibilityService() {
             if (txt.isBlank() || txt.length > 500) return@walk
             val rect = android.graphics.Rect()
             node.getBoundsInScreen(rect)
-            // 顶部 ActionBar 区域内的 TextView 不是气泡（标题/返回键/菜单）
-            if (rect.top < 200) return@walk
-            // 底部输入栏区域也排除（输入框里的草稿、发送按钮文字）
-            if (rect.top > screenW * 2.3) return@walk  // 粗略：手机一般 height ≈ width * 2.0~2.3
+            if (rect.top < topExclude) return@walk
+            if (rect.top > bottomExclude) return@walk
             val cx = (rect.left + rect.right) / 2
             val role = when {
                 cx < screenW * 0.45 -> Role.CUSTOMER
