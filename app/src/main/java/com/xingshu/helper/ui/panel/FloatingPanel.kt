@@ -7,7 +7,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -39,7 +38,7 @@ import com.xingshu.helper.ui.theme.XingShuTheme
 fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
 
-    // 每次打开悬浮窗都重置到主页：上一次留在结果页 / 设置 / 添加金标等子页面的状态视为"已结束"，
+    // 每次打开悬浮窗都重置到主页：上一次留在结果页 / 设置等子页面的状态视为"已结束"，
     // 用户再次打开通常是开始新一轮咨询。showPanel() 每次都新建 ComposeView，所以 LaunchedEffect(Unit) 每次都会跑。
     LaunchedEffect(Unit) {
         viewModel.navigateTo(PanelScreen.MAIN)

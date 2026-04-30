@@ -10,7 +10,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -92,16 +91,10 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel) {
                             RagMatchCard(
                                 rank = index + 1,
                                 match = match,
-                                sourceItem = sourceItem,
                                 copied = copiedLabel == "rag_$index",
                                 onCopy = {
                                     copyText(context, match.answer)
                                     copiedLabel = "rag_$index"
-                                },
-                                onSave = { newAnswer, newRiskNote ->
-                                    if (sourceItem != null) {
-                                        viewModel.updateRagAnswer(sourceItem, newAnswer, newRiskNote)
-                                    }
                                 },
                             )
                         }
@@ -306,13 +299,9 @@ private fun MetaRow(label: String, value: String, isWarning: Boolean = false) {
 private fun RagMatchCard(
     rank: Int,
     match: RagMatch,
-    sourceItem: QAItem?,
     copied: Boolean,
     onCopy: () -> Unit,
-    onSave: (newAnswer: String, newRiskNote: String) -> Unit,
 ) {
-    var editing by remember { mutableStateOf(false) }
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -349,150 +338,28 @@ private fun RagMatchCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (sourceItem != null) {
-                    IconButton(onClick = { editing = true }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(16.dp))
-                    }
-                }
-                FilledTonalButton(
-                    onClick = onCopy,
-                    enabled = !copied,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    modifier = Modifier.height(30.dp)
-                ) {
-                    if (copied) {
-                        Text("已复制 ✓", fontSize = 12.sp)
-                    } else {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("复制", fontSize = 12.sp)
-                    }
+            FilledTonalButton(
+                onClick = onCopy,
+                enabled = !copied,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.height(30.dp)
+            ) {
+                if (copied) {
+                    Text("已复制 ✓", fontSize = 12.sp)
+                } else {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("复制", fontSize = 12.sp)
                 }
             }
         }
         Text(match.answer, fontSize = 14.sp, lineHeight = 22.sp)
-
-        if (editing && sourceItem != null) {
-            InlineEditAnswer(
-                scene = sourceItem.scene,
-                question = sourceItem.questions.firstOrNull().orEmpty(),
-                initialAnswer = sourceItem.answer,
-                initialRiskNote = sourceItem.riskNote,
-                onCancel = { editing = false },
-                onSave = { newAnswer, newRiskNote ->
-                    onSave(newAnswer, newRiskNote)
-                    editing = false
-                }
-            )
-        }
-    }
-}
-
-/**
- * 内联展开的编辑区域。注意：悬浮窗在 TYPE_APPLICATION_OVERLAY 下，
- * Compose AlertDialog 会创建新的 system Window，从 Service Context 启动会因
- * BadTokenException 闪退，所以这里不能用 Dialog，改用内联展开。
- */
-@Composable
-private fun InlineEditAnswer(
-    scene: String,
-    question: String,
-    initialAnswer: String,
-    initialRiskNote: String,
-    onCancel: () -> Unit,
-    onSave: (String, String) -> Unit,
-) {
-    var answer by remember(initialAnswer) { mutableStateOf(initialAnswer) }
-    var riskNote by remember(initialRiskNote) { mutableStateOf(initialRiskNote) }
-    val context = LocalContext.current
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "修订：[$scene] $question",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
-            )
-            TextButton(
-                onClick = { answer = readClipboardText(context) },
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                modifier = Modifier.height(28.dp)
-            ) {
-                Icon(Icons.Filled.ContentPaste, contentDescription = "粘贴到回复", modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("粘贴回复", fontSize = 11.sp)
-            }
-            TextButton(
-                onClick = { riskNote = readClipboardText(context) },
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                modifier = Modifier.height(28.dp)
-            ) {
-                Icon(Icons.Filled.ContentPaste, contentDescription = "粘贴到风险", modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("粘贴风险", fontSize = 11.sp)
-            }
-        }
-        OutlinedTextField(
-            value = answer,
-            onValueChange = { answer = it },
-            label = { Text("回复内容 *", fontSize = 12.sp) },
-            minLines = 3,
-            maxLines = 8,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = riskNote,
-            onValueChange = { riskNote = it },
-            label = { Text("风险提示（可选）", fontSize = 12.sp) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Text(
-            "保存后以本地金标入库，下次同问句优先返回修订版。",
-            fontSize = 10.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedButton(
-                onClick = onCancel,
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-            ) { Text("取消", fontSize = 12.sp) }
-            Button(
-                onClick = { onSave(answer, riskNote) },
-                enabled = answer.isNotBlank(),
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-            ) { Text("保存", fontSize = 12.sp) }
-        }
     }
 }
 
 private fun copyText(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("reply", text))
-}
-
-private fun readClipboardText(context: Context): String {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    val clip = clipboard.primaryClip ?: return ""
-    if (clip.itemCount == 0) return ""
-    return clip.getItemAt(0).coerceToText(context)?.toString().orEmpty()
 }
 
 @Composable
