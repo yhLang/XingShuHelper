@@ -72,37 +72,40 @@ fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
                     onBack = { viewModel.navigateTo(PanelScreen.MAIN) }
                 )
 
-                when (state.currentScreen) {
-                    PanelScreen.MAIN -> MainContent(state = state, viewModel = viewModel)
-                    PanelScreen.RESULT -> ResultContent(state = state, viewModel = viewModel)
-                    PanelScreen.SETTINGS -> SettingsContent(
-                        currentAccount = state.account,
-                        corpusReady = state.corpusReady,
-                        corpusVersion = state.corpusVersion,
-                        corpusSync = state.corpusSync,
-                        corpusSyncConfigured = com.xingshu.helper.BuildConfig.CORPUS_REPO.isNotBlank(),
-                        onSwitchAccount = { viewModel.switchAccount(it) },
-                        onSyncCorpus = { viewModel.syncCorpus() },
-                        onPushAllLocalGold = { viewModel.pushAllLocalGoldToCloud() },
-                    )
-                    PanelScreen.SNIPPETS -> SnippetsContent(snippets = state.snippets)
-                    PanelScreen.ADD_GOLD -> AddGoldContent(state = state.addGold, viewModel = viewModel)
-                }
-
-                state.snackbar?.let { msg ->
-                    LaunchedEffect(msg) {
-                        delay(2000)
-                        viewModel.clearSnackbar()
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    when (state.currentScreen) {
+                        PanelScreen.MAIN -> MainContent(state = state, viewModel = viewModel)
+                        PanelScreen.RESULT -> ResultContent(state = state, viewModel = viewModel)
+                        PanelScreen.SETTINGS -> SettingsContent(
+                            currentAccount = state.account,
+                            corpusReady = state.corpusReady,
+                            corpusVersion = state.corpusVersion,
+                            corpusSync = state.corpusSync,
+                            corpusSyncConfigured = com.xingshu.helper.BuildConfig.CORPUS_REPO.isNotBlank(),
+                            onSwitchAccount = { viewModel.switchAccount(it) },
+                            onSyncCorpus = { viewModel.syncCorpus() },
+                            onPushAllLocalGold = { viewModel.pushAllLocalGoldToCloud() },
+                        )
+                        PanelScreen.SNIPPETS -> SnippetsContent(snippets = state.snippets)
+                        PanelScreen.ADD_GOLD -> AddGoldContent(state = state.addGold, viewModel = viewModel)
                     }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF323232))
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                    ) {
-                        Text(msg, color = Color.White, fontSize = 13.sp)
+
+                    state.snackbar?.let { msg ->
+                        LaunchedEffect(msg) {
+                            delay(2000)
+                            viewModel.clearSnackbar()
+                        }
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF323232))
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                        ) {
+                            Text(msg, color = Color.White, fontSize = 13.sp)
+                        }
                     }
                 }
             }
