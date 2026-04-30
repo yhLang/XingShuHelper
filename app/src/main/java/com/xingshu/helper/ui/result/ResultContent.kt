@@ -5,6 +5,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import android.util.Log
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -47,34 +49,38 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
         }
     }
 
-    // 统一的"填入微信"动作：根据无障碍服务返回结果给客服明确的反馈
+    // 统一的"填入微信"动作。
+    // 反馈用 Toast（系统级 UI）而不是 snackbar，因为 onClose() 销毁面板后
+    // snackbar 跟着没了；Toast 独立显示不受影响。
     val fillToWeChat: (String) -> Unit = { text ->
-        when (WeChatAccessibilityProbe.fillReplyToWeChat(text)) {
+        val result = WeChatAccessibilityProbe.fillReplyToWeChat(text)
+        Log.d("ResultContent", "fillToWeChat result=$result text=${text.take(30)}")
+        when (result) {
             WeChatAccessibilityProbe.Companion.FillResult.Success -> {
-                viewModel.postSnackbar("已填入微信，回微信检查后发送")
+                Toast.makeText(context, "已填入微信，回微信检查后发送", Toast.LENGTH_SHORT).show()
                 onClose()
             }
             WeChatAccessibilityProbe.Companion.FillResult.ServiceNotEnabled -> {
-                viewModel.postSnackbar("请先在设置中开启无障碍权限")
+                // 不关面板，用户回来后还能再点一次
+                Toast.makeText(context, "请开启「行恕客服助手」的无障碍权限", Toast.LENGTH_LONG).show()
                 context.startActivity(
                     Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }
             WeChatAccessibilityProbe.Companion.FillResult.NotInWeChat -> {
-                // 文本仍走剪贴板，让客服可以手动粘贴
                 copyText(context, text)
-                viewModel.postSnackbar("微信不在前台，已复制到剪贴板")
+                Toast.makeText(context, "微信不在前台，已复制到剪贴板", Toast.LENGTH_SHORT).show()
                 onClose()
             }
             WeChatAccessibilityProbe.Companion.FillResult.InputBoxNotFound -> {
                 copyText(context, text)
-                viewModel.postSnackbar("请先打开具体对话页（已复制兜底）")
+                Toast.makeText(context, "请先打开具体对话页（已复制到剪贴板兜底）", Toast.LENGTH_LONG).show()
                 onClose()
             }
             WeChatAccessibilityProbe.Companion.FillResult.SetTextFailed -> {
                 copyText(context, text)
-                viewModel.postSnackbar("填入失败，已复制到剪贴板")
+                Toast.makeText(context, "填入失败，已复制到剪贴板", Toast.LENGTH_SHORT).show()
                 onClose()
             }
         }
