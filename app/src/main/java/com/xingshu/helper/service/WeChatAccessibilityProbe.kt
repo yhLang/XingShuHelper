@@ -77,7 +77,14 @@ class WeChatAccessibilityProbe : AccessibilityService() {
             val svc = instance ?: return FillResult.ServiceNotEnabled
             val root = svc.rootInActiveWindow ?: return FillResult.NotInWeChat
             if (root.packageName?.toString() != WECHAT_PKG) return FillResult.NotInWeChat
-            val input = root.findInputEditText() ?: return FillResult.InputBoxNotFound
+            val input = root.findInputEditText()
+            if (input == null) {
+                // 调试：找不到输入框时 dump 所有 editable 节点，看微信用什么自定义类
+                Log.w(TAG, "input not found, dumping all editable / EditText-like nodes:")
+                root.walkDump()
+                return FillResult.InputBoxNotFound
+            }
+            Log.i(TAG, "input found: cls=${input.className} id=${input.viewIdResourceName}")
             val args = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
             }
@@ -85,10 +92,11 @@ class WeChatAccessibilityProbe : AccessibilityService() {
             return if (ok) FillResult.Success else FillResult.SetTextFailed
         }
 
-        /** 在 view tree 里找输入框：标准 EditText 且 editable。 */
+        /** 找输入框：放宽到任何 isEditable=true 的节点。 */
         private fun AccessibilityNodeInfo.findInputEditText(): AccessibilityNodeInfo? {
+            if (isEditable) return this
             val cls = className?.toString().orEmpty()
-            if (cls == "android.widget.EditText" && isEditable) return this
+            if (cls.endsWith("EditText")) return this
             for (i in 0 until childCount) {
                 val child = getChild(i) ?: continue
                 val hit = child.findInputEditText()
@@ -96,6 +104,31 @@ class WeChatAccessibilityProbe : AccessibilityService() {
                 child.recycle()
             }
             return null
+        }
+
+        /** 调试：遍历节点，把可能是输入框的全打出来。 */
+        private fun AccessibilityNodeInfo.walkDump() {
+            val cls = className?.toString().orEmpty()
+            val interesting = isEditable ||
+                cls.contains("Edit", ignoreCase = true) ||
+                cls.contains("Input", ignoreCase = true) ||
+                cls.endsWith("TextView")  // 微信可能用 TextView 当输入框
+            if (interesting) {
+                val rect = android.graphics.Rect()
+                getBoundsInScreen(rect)
+                Log.w(
+                    TAG,
+                    "  cls=$cls id=${viewIdResourceName ?: "-"} editable=$isEditable " +
+                        "focused=$isFocused clickable=$isClickable " +
+                        "x=${rect.left}-${rect.right} y=${rect.top}-${rect.bottom} " +
+                        "text=\"${text?.toString()?.take(30)?.replace('\n', ' ')}\""
+                )
+            }
+            for (i in 0 until childCount) {
+                val child = getChild(i) ?: continue
+                child.walkDump()
+                child.recycle()
+            }
         }
     }
 }
