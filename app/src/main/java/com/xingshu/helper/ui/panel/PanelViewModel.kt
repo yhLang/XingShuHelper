@@ -493,17 +493,42 @@ class PanelViewModel(
      * 永远跑不到。
      */
     /**
-     * 把回复填入微信。流程：
-     *   1. 拉起微信（停在上次离开的页面）
-     *   2. 第一次延时 800ms 等微信渲染
-     *   3. 轮询找输入框最多 6 秒；落在聊天列表时给客服时间手动点开某个对话
-     *   4. 找到就 SET_TEXT，超时就提示"请长按粘贴"
-     * 用 viewModelScope 而不是 Composable 的 scope，避免 onClose() 销毁面板后协程被取消。
+     * 把回复填入微信。
+     *
+     * 关键前提：客服在微信对话页上方打开悬浮窗 → 点"填入微信" → onClose() 关掉悬浮窗
+     * → 底下的微信对话页恢复焦点。所以正常情况下微信本来就在前台，直接 SET_TEXT 即可，
+     * 不需要 startActivity 拉起（那反而会把微信切回 LauncherUI 主入口，丢失对话页）。
+     *
+     * 仅当 NotInWeChat（用户从别处打开悬浮窗）时才拉起微信兜底。
      */
     fun fillReplyToWeChat(text: String) {
         android.util.Log.i("PanelViewModel", "fillReplyToWeChat entered, text=${text.take(30)}")
         viewModelScope.launch {
             try {
+                // 等面板移除后视图栈切换稳定
+                kotlinx.coroutines.delay(200)
+                val first = com.xingshu.helper.service.WeChatAccessibilityProbe.fillReplyToWeChat(text)
+                android.util.Log.d("PanelViewModel", "first attempt result=$first")
+                when (first) {
+                    com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.Success -> {
+                        showSnackbar("已填入微信")
+                        return@launch
+                    }
+                    com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.InputBoxNotFound -> {
+                        // 在微信但当前页面没有输入框（聊天列表/通讯录/发现）
+                        showSnackbar("请打开具体对话页（已复制，可长按粘贴）")
+                        return@launch
+                    }
+                    com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.NotInWeChat -> {
+                        // 不在微信前台 → 拉起兜底
+                    }
+                    else -> {
+                        showSnackbar("填入失败（已复制，可长按粘贴）")
+                        return@launch
+                    }
+                }
+
+                // NotInWeChat 兜底：拉起微信，再轮询一段时间等输入框出现
                 val launchIntent = appContext.packageManager
                     .getLaunchIntentForPackage("com.tencent.mm")
                     ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -512,30 +537,17 @@ class PanelViewModel(
                     return@launch
                 }
                 appContext.startActivity(launchIntent)
-                kotlinx.coroutines.delay(800) // 等微信前台渲染
-
-                // 轮询：每 400ms 试一次，最多 6 秒。期间客服可以手动切到对话页。
-                val deadline = System.currentTimeMillis() + 6_000
-                var lastResult: com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult? = null
+                kotlinx.coroutines.delay(800)
+                val deadline = System.currentTimeMillis() + 5_000
                 while (System.currentTimeMillis() < deadline) {
                     val r = com.xingshu.helper.service.WeChatAccessibilityProbe.fillReplyToWeChat(text)
-                    lastResult = r
                     if (r is com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.Success) {
-                        android.util.Log.d("PanelViewModel", "fillReplyToWeChat success after polling")
                         showSnackbar("已填入微信")
                         return@launch
                     }
                     kotlinx.coroutines.delay(400)
                 }
-                android.util.Log.d("PanelViewModel", "fillReplyToWeChat timeout, lastResult=$lastResult")
-                val msg = when (lastResult) {
-                    com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.InputBoxNotFound ->
-                        "请打开具体对话页（已复制，可长按粘贴）"
-                    com.xingshu.helper.service.WeChatAccessibilityProbe.Companion.FillResult.NotInWeChat ->
-                        "微信未在前台（已复制，可长按粘贴）"
-                    else -> "填入失败（已复制，可长按粘贴）"
-                }
-                showSnackbar(msg)
+                showSnackbar("请打开具体对话页（已复制，可长按粘贴）")
             } catch (t: Throwable) {
                 android.util.Log.e("PanelViewModel", "fillReplyToWeChat crashed", t)
                 showSnackbar("填入异常：${t.message ?: t.javaClass.simpleName}")
