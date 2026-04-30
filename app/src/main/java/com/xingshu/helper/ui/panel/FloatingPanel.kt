@@ -38,10 +38,16 @@ import com.xingshu.helper.ui.theme.XingShuTheme
 fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
 
-    // 每次打开悬浮窗都重置到主页：上一次留在结果页 / 设置等子页面的状态视为"已结束"，
-    // 用户再次打开通常是开始新一轮咨询。showPanel() 每次都新建 ComposeView，所以 LaunchedEffect(Unit) 每次都会跑。
+    // 重新打开面板时：
+    // - 若上次留在结果页且生成成功 → 保留结果页（防误关丢失三版回复）
+    // - 否则回到主页开始新一轮
+    // showPanel() 每次都新建 ComposeView，所以 LaunchedEffect(Unit) 每次都会跑。
     LaunchedEffect(Unit) {
-        viewModel.navigateTo(PanelScreen.MAIN)
+        val keepResult = state.currentScreen == PanelScreen.RESULT &&
+            state.generateState is GenerateState.Success
+        if (!keepResult) {
+            viewModel.navigateTo(PanelScreen.MAIN)
+        }
         viewModel.readClipboard()
     }
 
