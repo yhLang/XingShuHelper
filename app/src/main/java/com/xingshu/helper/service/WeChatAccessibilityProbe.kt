@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 
 /**
  * 微信输入框注入器（无障碍服务）。
@@ -75,12 +76,27 @@ class WeChatAccessibilityProbe : AccessibilityService() {
          */
         fun fillReplyToWeChat(text: String): FillResult {
             val svc = instance ?: return FillResult.ServiceNotEnabled
-            val root = svc.rootInActiveWindow ?: return FillResult.NotInWeChat
-            if (root.packageName?.toString() != WECHAT_PKG) return FillResult.NotInWeChat
+
+            // 关键：rootInActiveWindow 在悬浮窗存在时拿到的是悬浮窗自己，
+            // 即使我们关闭了面板，悬浮球（type APPLICATION_OVERLAY）仍可能是 active window。
+            // 正确做法：用 getWindows() 遍历所有窗口，找到 type=APPLICATION + 包名=微信的那个。
+            val allWindows = svc.windows
+            Log.d(TAG, "windows count=${allWindows?.size ?: 0}")
+            val wechatWindow = allWindows?.firstOrNull { w ->
+                w.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                    w.root?.packageName?.toString() == WECHAT_PKG
+            }
+            if (wechatWindow == null) {
+                Log.w(TAG, "wechat window not found among ${allWindows?.size ?: 0} windows")
+                allWindows?.forEachIndexed { i, w ->
+                    Log.v(TAG, "  window#$i type=${w.type} pkg=${w.root?.packageName}")
+                }
+                return FillResult.NotInWeChat
+            }
+            val root = wechatWindow.root ?: return FillResult.NotInWeChat
             val input = root.findInputEditText()
             if (input == null) {
-                // 调试：找不到输入框时 dump 所有 editable 节点，看微信用什么自定义类
-                Log.w(TAG, "input not found, dumping all editable / EditText-like nodes:")
+                Log.w(TAG, "input not found in wechat window, dumping editable / EditText-like nodes:")
                 root.walkDump()
                 return FillResult.InputBoxNotFound
             }
