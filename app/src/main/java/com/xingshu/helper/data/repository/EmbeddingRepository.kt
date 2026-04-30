@@ -73,6 +73,7 @@ class EmbeddingRepository {
                 index to vec
             }.sortedBy { it.first }.map { it.second }
         } catch (e: Exception) {
+            android.util.Log.e("EmbeddingRepo", "embedBatch 失败：${e.message}")
             null
         }
     }

@@ -14,21 +14,6 @@ class VectorStore {
         entries = items.map { (item, vec) -> item to normalize(vec) }
     }
 
-    fun upsertByQuestion(question: String, newItem: QAItem, newVec: FloatArray) {
-        val filtered = entries.filterNot { (item, _) ->
-            item.questions.firstOrNull() == question
-        }
-        entries = filtered + (newItem to normalize(newVec))
-    }
-
-    /** 找回 question 对应的向量（编辑 answer 时复用原向量，不需重新调 embedding API）。 */
-    fun vectorForQuestion(question: String): FloatArray? =
-        entries.firstOrNull { (item, _) -> item.questions.firstOrNull() == question }?.second
-
-    /** 找回 question 对应的 QAItem。用于升级金标时拿到原条目（assets 来源不可写但可读）。 */
-    fun itemForQuestion(question: String): QAItem? =
-        entries.firstOrNull { (item, _) -> item.questions.firstOrNull() == question }?.first
-
     fun search(query: FloatArray, topK: Int = 5): List<Pair<QAItem, Float>> {
         val snapshot = entries
         if (snapshot.isEmpty()) return emptyList()

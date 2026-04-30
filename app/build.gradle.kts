@@ -17,9 +17,6 @@ val githubRepo: String = localProps.getProperty("GITHUB_REPO", "")
 // 金标语料库独立仓库（可与 APK 仓库不同），格式 "owner/repo"，分支默认 main
 val corpusRepo: String = localProps.getProperty("CORPUS_REPO", "")
 val corpusBranch: String = localProps.getProperty("CORPUS_BRANCH", "main")
-// 阿里云 FC 中转的 HTTP URL；空字符串 → App 不显示上传按钮
-val corpusUploadUrl: String = localProps.getProperty("CORPUS_UPLOAD_URL", "")
-val corpusUploadSecret: String = localProps.getProperty("CORPUS_UPLOAD_SECRET", "")
 
 // 版本号：默认值；CI 通过 -PversionName / -PversionCode 注入实际值
 val ciVersionName: String = (project.findProperty("versionName") as String?) ?: "1.0.0"
@@ -42,8 +39,6 @@ android {
         buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
         buildConfigField("String", "CORPUS_REPO", "\"$corpusRepo\"")
         buildConfigField("String", "CORPUS_BRANCH", "\"$corpusBranch\"")
-        buildConfigField("String", "CORPUS_UPLOAD_URL", "\"$corpusUploadUrl\"")
-        buildConfigField("String", "CORPUS_UPLOAD_SECRET", "\"$corpusUploadSecret\"")
     }
 
     signingConfigs {
