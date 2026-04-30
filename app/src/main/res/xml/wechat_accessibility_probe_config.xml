@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+PoC 配置：临时探测微信单聊节点结构，验证完会删。
+- packageNames：只监听微信，不读其他应用内容
+- typeWindowContentChanged：客户/自己发新消息时触发
+- typeWindowStateChanged：切换对话窗口时触发
+- 仅请求 retrieveWindowContent，不要求 canPerformGestures / canRetrieveText 等高危能力
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/probe_accessibility_description"
+    android:notificationTimeout="200"
+    android:packageNames="com.tencent.mm"
+    android:settingsActivity="com.xingshu.helper.MainActivity" />

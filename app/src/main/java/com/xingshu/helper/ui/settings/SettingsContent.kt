@@ -1,11 +1,14 @@
 package com.xingshu.helper.ui.settings
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,6 +64,11 @@ fun SettingsContent(
                 onCheck = onSyncCorpus,
             )
         }
+
+        HorizontalDivider()
+
+        SectionTitle("【调试】无障碍探测（PoC）")
+        AccessibilityProbeRow()
 
         HorizontalDivider()
 
@@ -124,6 +132,30 @@ private fun AccountRow(
 @Composable
 private fun SectionTitle(title: String) {
     Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+}
+
+@Composable
+private fun AccessibilityProbeRow() {
+    val context = LocalContext.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "用于验证微信单聊节点稳定性。开启后到微信单聊里聊几条，" +
+                "再用 adb logcat -s WeChatProbe 收集日志。验证完关掉即可。",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            lineHeight = 18.sp
+        )
+        OutlinedButton(
+            onClick = {
+                context.startActivity(
+                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+        ) {
+            Text("打开系统无障碍设置")
+        }
+    }
 }
 
 @Composable
