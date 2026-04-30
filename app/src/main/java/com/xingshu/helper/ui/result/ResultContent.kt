@@ -36,8 +36,11 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
 
     LaunchedEffect(copiedLabel) {
         if (copiedLabel != null) {
-            // 复制成功 → 短暂显示 ✓ 反馈 → 自动关闭面板，让用户切回微信粘贴
+            // 复制成功 → 短暂显示 ✓ 反馈 → 标记结果已消费 → 自动关闭面板，
+            // 让用户切回微信粘贴。下次再开悬浮窗会回首页开始新一轮，不会
+            // 恢复到上次已发过的结果页（误关保留逻辑只针对"没复制就关"的场景）。
             delay(600)
+            viewModel.markResultConsumed()
             onClose()
             copiedLabel = null
         }

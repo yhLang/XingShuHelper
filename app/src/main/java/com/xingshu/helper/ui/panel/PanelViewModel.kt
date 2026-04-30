@@ -489,6 +489,24 @@ class PanelViewModel(
         _state.update { it.copy(currentScreen = screen) }
     }
 
+    /**
+     * 标记本次生成结果已被消费（客服复制了某版回复并发出去）。
+     * 把 generateState 重置为 Idle、currentScreen 切回 MAIN，这样下次重新打开
+     * 面板时 FloatingPanelRoot 的 keepResult 条件不再成立，自然回首页开始新一轮，
+     * 而不是恢复已经发过的结果页。
+     */
+    fun markResultConsumed() {
+        _state.update {
+            it.copy(
+                generateState = GenerateState.Idle,
+                currentScreen = PanelScreen.MAIN,
+                referencedQas = emptyList(),
+                lastQuery = null,
+                factCheckIssues = emptyList(),
+            )
+        }
+    }
+
     fun clearSnackbar() {
         _state.update { it.copy(snackbar = null) }
     }
