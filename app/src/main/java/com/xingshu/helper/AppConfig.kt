@@ -5,6 +5,10 @@ internal object AppConfig {
     // 注意：BuildConfig 字段非编译期常量，因此这里用 val 而不是 const val
     val API_KEY: String = BuildConfig.DASHSCOPE_API_KEY
     const val API_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    const val CHAT_MODEL = "qwen-plus"
+    // deepseek-v4-flash：百炼的轻量化 MoE（284B 总参 / 13B 激活），延迟显著低于
+    // qwen-plus，function calling + cache 都支持，价格更低（输入 1元/M、命中 0.2元/M、
+    // 输出 2元/M）。注意：百炼侧"结构化输出"未勾选，所以我们继续走 tool_calls 路径，
+    // 不要切到 response_format=json_schema 模式。
+    const val CHAT_MODEL = "deepseek-v4-flash"
     const val VISION_MODEL = "qwen-vl-max"
 }
