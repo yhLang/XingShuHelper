@@ -16,12 +16,6 @@ data class QAItem(
     val riskNote: String = "",
 )
 
-data class RagMatch(
-    val scene: String,
-    val answer: String,
-    val score: Float,
-)
-
 data class GeneratedResult(
     val isSensitive: Boolean = false,
     val sensitiveNote: String = "",
@@ -31,8 +25,6 @@ data class GeneratedResult(
     val intent: String = "",
     val nextStep: String = "",
     val humanConfirm: String = "",
-    val isDirectMatch: Boolean = false,
-    val ragMatches: List<RagMatch> = emptyList()
 )
 
 sealed class GenerateState {

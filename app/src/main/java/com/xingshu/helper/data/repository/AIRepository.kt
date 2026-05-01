@@ -60,33 +60,6 @@ class AIRepository {
         return runChatCompletion(userContent, apiKey, baseUrl, contextItems, structuredContext)
     }
 
-    /** 结构化查询路径：直接用结构化 KB 生成，不走 RAG，不附话术库兜底。 */
-    fun generateStructured(
-        messages: List<String>,
-        apiKey: String,
-        baseUrl: String,
-        structuredContext: String
-    ): Flow<GenerateState> {
-        val userContent = if (messages.size == 1) {
-            "客户消息：${messages[0]}"
-        } else {
-            "客户连续发来的消息（按顺序）：\n" +
-                    messages.mapIndexed { i, m -> "${i + 1}. $m" }.joinToString("\n")
-        }
-        return runChatCompletion(userContent, apiKey, baseUrl, emptyList(), structuredContext, useQaFallback = false)
-    }
-
-    /** 结构化查询路径（对话版）：直接用结构化 KB 生成，不走 RAG，不附话术库兜底。 */
-    fun generateStructuredFromDialog(
-        dialog: List<com.xingshu.helper.data.model.DialogMessage>,
-        apiKey: String,
-        baseUrl: String,
-        structuredContext: String
-    ): Flow<GenerateState> {
-        val userContent = buildDialogContent(dialog)
-        return runChatCompletion(userContent, apiKey, baseUrl, emptyList(), structuredContext, useQaFallback = false)
-    }
-
     private fun buildDialogContent(dialog: List<com.xingshu.helper.data.model.DialogMessage>): String = buildString {
         appendLine("以下是与客户的最近微信对话（按时间从早到晚）：")
         appendLine()
@@ -108,7 +81,6 @@ class AIRepository {
         baseUrl: String,
         contextItems: List<QAItem>,
         structuredContext: String = "",
-        useQaFallback: Boolean = true
     ): Flow<GenerateState> = flow {
         emit(GenerateState.Loading)
 
@@ -117,13 +89,9 @@ class AIRepository {
             return@flow
         }
 
-        val systemPrompt = if (!useQaFallback && structuredContext.isNotBlank()) {
-            // 结构化路径：专用 prompt，直接引用结构化数据，不附话术库
-            QALibrary.buildStructuredPrompt(structuredContext)
-        } else {
-            val effectiveItems = contextItems.ifEmpty { QALibrary.items }
-            QALibrary.buildPrompt(effectiveItems, structuredContext)
-        }
+        // 结构化 KB（事实）+ 金标话术（语气样本）一起注入。RAG 召回不到时用全量金标兜底。
+        val effectiveItems = contextItems.ifEmpty { QALibrary.items }
+        val systemPrompt = QALibrary.buildPrompt(effectiveItems, structuredContext)
 
         val body = buildJsonObject {
             put("model", com.xingshu.helper.AppConfig.CHAT_MODEL)

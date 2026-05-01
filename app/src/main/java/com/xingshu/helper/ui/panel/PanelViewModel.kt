@@ -15,7 +15,6 @@ import com.xingshu.helper.data.model.GeneratedResult
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.data.model.QAItem
-import com.xingshu.helper.data.model.RagMatch
 import com.xingshu.helper.data.model.Snippet
 import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
@@ -23,7 +22,6 @@ import com.xingshu.helper.data.repository.CorpusSyncManager
 import com.xingshu.helper.data.repository.EmbeddingRepository
 import com.xingshu.helper.data.repository.FactChecker
 import com.xingshu.helper.data.repository.QACorpusLoader
-import com.xingshu.helper.data.repository.QueryRouter
 import com.xingshu.helper.data.repository.SnippetRepository
 import com.xingshu.helper.data.repository.StructuredKnowledgeBase
 import com.xingshu.helper.data.repository.VectorStore
@@ -365,19 +363,21 @@ class PanelViewModel(
 
     /**
      * 默认入口：先判断是否结构化查询（价格/时段/地址）。
-     * - 结构化查询 → 直接调 LLM + 结构化 KB，跳过 RAG
-     * - 话术查询 → RAG 匹配，用户可在结果页点"结合 AI"再走 generateWithAi()
+     *
+     * 不再有路由分叉。每次都：检索金标 → 注入 system prompt（结构化 KB + 金标样本）→ LLM 生成三版回复。
+     * 金标量级太小（141/73 条），无法覆盖客户问法长尾，"先 RAG 直答"的快路径反而藏起了 LLM 综合能力。
+     * 默认走 LLM，金标作 in-context 样本提供语气，结构化 KB 提供事实，FactChecker 兜底防价格幻觉。
      */
     private fun doGenerate(messages: List<String>) {
         _state.update { it.copy(lastQuery = LastQuery.Messages(messages)) }
         generateJob?.cancel()
         generateJob = viewModelScope.launch {
             val query = messages.joinToString("\n")
-            if (QueryRouter.route(query) == QueryRouter.RouteType.STRUCTURED) {
-                doStructuredGenerate(messages = messages, dialog = null)
-            } else {
-                doRagOnly(query)
-            }
+            val contextItems = retrieveContext(query)
+            aiRepository.generate(
+                messages, AppConfig.API_KEY, AppConfig.API_BASE_URL,
+                contextItems, currentStructuredContext
+            ).collect { collectGenerateState(it) }
         }
     }
 
@@ -385,44 +385,21 @@ class PanelViewModel(
         _state.update { it.copy(lastQuery = LastQuery.Dialog(dialog)) }
         generateJob?.cancel()
         generateJob = viewModelScope.launch {
-            // 检索时只用客户那边的话，否则会把"我"的旧回复混进 RAG query 影响相似度。
-            // 只取最近 3 条：早期消息已处理完，拼进去会稀释最新问题的语义信号。
+            // 检索只用客户那边最近 3 条：避免"我"的旧回复混进 query 稀释相似度。
             val customerOnly = dialog.filter { it.role == DialogRole.CUSTOMER }
                 .takeLast(3)
                 .joinToString("\n") { it.text }
-            if (QueryRouter.route(customerOnly) == QueryRouter.RouteType.STRUCTURED) {
-                doStructuredGenerate(messages = null, dialog = dialog)
-            } else {
-                doRagOnly(customerOnly)
-            }
+            val contextItems = retrieveContext(customerOnly)
+            aiRepository.generateFromDialog(
+                dialog, AppConfig.API_KEY, AppConfig.API_BASE_URL,
+                contextItems, currentStructuredContext
+            ).collect { collectGenerateState(it) }
         }
     }
 
-    /**
-     * 结构化查询路径：直接调 LLM，只注入结构化 KB，不走 RAG embedding/向量检索。
-     * 如果结构化 KB 未加载（空），降级为话术 RAG 路径。
-     */
-    private suspend fun doStructuredGenerate(messages: List<String>?, dialog: List<DialogMessage>?) {
-        if (currentStructuredContext.isBlank()) {
-            val query = messages?.joinToString("\n")
-                ?: dialog!!.filter { it.role == DialogRole.CUSTOMER }.takeLast(3).joinToString("\n") { it.text }
-            android.util.Log.w("PanelViewModel", "结构化 KB 未加载，降级走 RAG")
-            doRagOnly(query)
-            return
-        }
-        android.util.Log.d("PanelViewModel", "结构化路径：跳过 RAG 直接调 LLM")
-        val flow = if (messages != null) {
-            aiRepository.generateStructured(messages, AppConfig.API_KEY, AppConfig.API_BASE_URL, currentStructuredContext)
-        } else {
-            aiRepository.generateStructuredFromDialog(dialog!!, AppConfig.API_KEY, AppConfig.API_BASE_URL, currentStructuredContext)
-        }
-        flow.collect { collectGenerateState(it) }
-    }
-
-    /** 结果页"结合 AI"按钮触发：复用刚才已检索好的 RAG 上下文（不再调 embedding API），调 LLM 生成三版回复。 */
-    fun generateWithAi() {
+    /** 结果页"再来一版"按钮触发：复用 lastQuery 重新生成（同时复用 state.referencedQas 省 embedding API）。 */
+    fun regenerate() {
         val query = _state.value.lastQuery ?: return
-        // 直接复用 state.referencedQas 里的 RAG 命中，省去再次 embedding 查询
         val contextItems = _state.value.referencedQas.map { it.item }
         generateJob?.cancel()
         generateJob = viewModelScope.launch {
@@ -439,17 +416,9 @@ class PanelViewModel(
         }
     }
 
-    private suspend fun doRagOnly(query: String) {
-        _state.update { it.copy(generateState = GenerateState.Loading) }
-        val matches = retrieveContextWithScores(query)
-        if (matches.isEmpty()) {
-            collectGenerateState(GenerateState.Error("未找到匹配的历史回答，请检查语料库是否加载"))
-            return
-        }
-        val ragMatches = matches.map { (item, score) ->
-            RagMatch(scene = item.scene, answer = item.answer, score = score)
-        }
-        collectGenerateState(GenerateState.Success(GeneratedResult(isDirectMatch = true, ragMatches = ragMatches)))
+    /** 检索金标：返回 QAItem 列表（顺序按相似度降序），同时把带分数的版本写入 state 供 UI 展示 */
+    private suspend fun retrieveContext(query: String): List<QAItem> {
+        return retrieveContextWithScores(query).map { (item, _) -> item }
     }
 
     private suspend fun retrieveContextWithScores(query: String): List<Pair<QAItem, Float>> {
@@ -470,10 +439,9 @@ class PanelViewModel(
     private fun collectGenerateState(state: GenerateState) {
         _state.update { it.copy(generateState = state) }
         if (state is GenerateState.Success) {
-            // 防幻觉校验：把三版回复和 RAG 命中文本拼起来，逐个查价格/时段
+            // 防幻觉校验：把三版回复拼起来，逐个查价格/时段
             val r = state.result
             val combined = listOf(r.shortVersion, r.naturalVersion, r.inviteVersion)
-                .plus(r.ragMatches.map { it.answer })
                 .joinToString("\n")
             val issues = FactChecker.check(combined, currentStructuredContext)
             if (issues.isNotEmpty()) {
