@@ -352,16 +352,9 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier.size(72.dp),
             )
             Text(
-                "悬浮球已启动",
+                "已启动",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                "悬浮球已显示在屏幕侧边。\n切换到微信后随时点击使用。",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                lineHeight = 22.sp
             )
 
             Spacer(Modifier.height(8.dp))
@@ -395,16 +388,9 @@ class MainActivity : ComponentActivity() {
                 tint = MaterialTheme.colorScheme.secondary
             )
             Text(
-                "需要「悬浮窗」权限",
+                "未启动",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                "助手需要在其他应用上方显示悬浮球。\n点击下方按钮，在系统设置中开启权限后返回即可。",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                lineHeight = 22.sp
             )
 
             Spacer(Modifier.height(8.dp))
