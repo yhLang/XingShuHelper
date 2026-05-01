@@ -8,7 +8,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -89,9 +88,10 @@ class AIRepository {
             return@flow
         }
 
-        // 结构化 KB（事实）+ 金标话术（语气样本）一起注入。RAG 召回不到时用全量金标兜底。
-        val effectiveItems = contextItems.ifEmpty { QALibrary.items }
-        val systemPrompt = QALibrary.buildPrompt(effectiveItems, structuredContext)
+        // 结构化 KB（事实）+ 金标话术（语气样本）一起注入。
+        // RAG 召回为空时（极少见），buildPrompt 内部会跳过"标准话术"段落，
+        // 仅靠结构化 KB + ROLE_INSTRUCTION 也能生成。
+        val systemPrompt = QALibrary.buildPrompt(contextItems, structuredContext)
 
         val body = buildJsonObject {
             put("model", com.xingshu.helper.AppConfig.CHAT_MODEL)
