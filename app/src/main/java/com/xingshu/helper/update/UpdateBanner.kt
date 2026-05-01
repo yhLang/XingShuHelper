@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.xingshu.helper.BuildConfig
+import kotlinx.coroutines.CancellationException
 import java.io.File
 
 @Composable
@@ -55,6 +56,10 @@ fun UpdateBanner() {
                     else -> Unit
                 }
             }
+        } catch (e: CancellationException) {
+            // checkTrigger 重新触发时上一次会被取消，这是正常协程取消，
+            // 必须 rethrow 让 Compose 协程系统正常清理，不能当业务错误吞
+            throw e
         } catch (e: Exception) {
             error = "检查更新异常：${e.message}"
         }
@@ -85,6 +90,8 @@ fun UpdateBanner() {
                     else -> Unit
                 }
             }
+        } catch (e: CancellationException) {
+            throw e  // 用户点取消 / Composable 离开组合时会到这里，不算下载错误
         } catch (e: Exception) {
             error = "下载异常：${e.message}"
             downloading = false
