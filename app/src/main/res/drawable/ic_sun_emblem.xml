@@ -5,17 +5,17 @@
     android:viewportWidth="100"
     android:viewportHeight="100">
 
-    <!-- Full-ground red rim keeps the floating entrance tied to the app palette. -->
+    <!-- 极淡的白色高光描边，给悬浮球一点点 3D 立体感（图 2 风格的 highlight 效果）。 -->
     <path
-        android:fillColor="@color/full_ground_red"
+        android:fillColor="#FFFFFFFF"
         android:pathData="M50,0 a50,50 0 1,0 0,100 a50,50 0 1,0 0,-100 Z" />
 
-    <!-- Qing-tian blue field. -->
+    <!-- 青天蓝主底色。留 1.5px 内缩，形成外圈微微的白色高光。 -->
     <path
         android:fillColor="@color/qing_tian_blue"
-        android:pathData="M50,4 a46,46 0 1,0 0,92 a46,46 0 1,0 0,-92 Z" />
+        android:pathData="M50,1.5 a48.5,48.5 0 1,0 0,97 a48.5,48.5 0 1,0 0,-97 Z" />
 
-    <!-- 12 white sun rays. -->
+    <!-- 12 道白色光芒。 -->
     <path
         android:fillColor="@color/white_sun"
         android:pathData="
@@ -32,14 +32,8 @@
             M12.6,28.5 L29.38,41.62 L32.5,36.22 Z
             M28.5,12.6 L36.22,32.5 L41.62,29.38 Z" />
 
-    <!-- Qing-tian blue ring separates rays from center. -->
-    <path
-        android:fillColor="@color/qing_tian_blue"
-        android:pathData="M50,27 a23,23 0 1,0 0,46 a23,23 0 1,0 0,-46 Z" />
-
-    <!-- White center circle. -->
+    <!-- 白色圆心，光芒底部直接贴到圆心，去掉蓝色分隔环，更接近图 2 视觉。 -->
     <path
         android:fillColor="@color/white_sun"
-        android:pathData="M50,31 a19,19 0 1,0 0,38 a19,19 0 1,0 0,-38 Z" />
-
+        android:pathData="M50,28 a22,22 0 1,0 0,44 a22,22 0 1,0 0,-44 Z" />
 </vector>

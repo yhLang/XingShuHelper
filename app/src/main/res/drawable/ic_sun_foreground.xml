@@ -5,12 +5,7 @@
     android:viewportWidth="100"
     android:viewportHeight="100">
 
-    <!-- Subtle red base visible in adaptive icon previews. -->
-    <path
-        android:fillColor="@color/full_ground_red"
-        android:pathData="M12,70 L88,70 L88,92 L12,92 Z" />
-
-    <!-- 12 white sun rays, kept inside the adaptive icon safe area. -->
+    <!-- 12 道白色光芒，尺寸落在 adaptive icon safe area（半径 ~33）内。 -->
     <path
         android:fillColor="@color/white_sun"
         android:pathData="
@@ -27,14 +22,8 @@
             M21.42,33.5 L34.05,43.56 L36.45,39.41 Z
             M33.5,21.42 L39.41,36.45 L43.56,34.05 Z" />
 
-    <!-- Qing-tian blue ring. -->
-    <path
-        android:fillColor="@color/qing_tian_blue"
-        android:pathData="M50,32.8 a17.2,17.2 0 1,0 0,34.4 a17.2,17.2 0 1,0 0,-34.4 Z" />
-
-    <!-- White center circle. -->
+    <!-- 白色圆心。Material You 风格：去掉蓝色分隔环，光芒底部直接贴圆心。 -->
     <path
         android:fillColor="@color/white_sun"
-        android:pathData="M50,34.94 a15.06,15.06 0 1,0 0,30.12 a15.06,15.06 0 1,0 0,-30.12 Z" />
-
+        android:pathData="M50,33 a17,17 0 1,0 0,34 a17,17 0 1,0 0,-34 Z" />
 </vector>
