@@ -175,6 +175,10 @@ class FloatingBallService : Service(),
         panelView?.let { windowManager.removeViewImmediate(it) }
         panelView = null
         isPanelVisible = false
+        // 任何关闭路径（用户点球收起 / 点 X / 复制后自动关 / OCR 临时隐藏 / Service 销毁）
+        // 都把 ViewModel 状态打回首页。下次再开总是从首页开始，不会"恢复"到上次的结果页或设置页。
+        // OCR 流程稍后会通过 ShowPanel 事件重建面板，那时 dialogMessages 已写入，仍能正常显示。
+        viewModel.resetToHome()
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────

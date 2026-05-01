@@ -453,7 +453,17 @@ class PanelViewModel(
      * 面板时 FloatingPanelRoot 的 keepResult 条件不再成立，自然回首页开始新一轮，
      * 而不是恢复已经发过的结果页。
      */
-    fun markResultConsumed() {
+    fun markResultConsumed() = resetToHome()
+
+    /**
+     * 把面板状态打回首页：取消在飞的生成任务、清掉生成结果、清掉 RAG 召回缓存。
+     * 触发时机：
+     *   - 用户复制 AI 回复或金标后（markResultConsumed）
+     *   - 用户主动关闭面板（点悬浮球收起 / 点 X 按钮）— 由 FloatingBallService.removePanel 调用
+     * 不动 dialogMessages / basket / clipboard：那是用户收集的素材，不能因为关一下面板就丢。
+     */
+    fun resetToHome() {
+        generateJob?.cancel()
         _state.update {
             it.copy(
                 generateState = GenerateState.Idle,
