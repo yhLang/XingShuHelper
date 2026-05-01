@@ -366,7 +366,17 @@ class MainActivity : ComponentActivity() {
 
             Spacer(Modifier.height(8.dp))
 
-            OutlinedButton(onClick = { finish() }) {
+            val context = LocalContext.current
+            OutlinedButton(onClick = {
+                val intent = context.packageManager.getLaunchIntentForPackage("com.tencent.mm")
+                if (intent != null) {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                    finish()
+                } else {
+                    Toast.makeText(context, "未检测到微信，请确认已安装", Toast.LENGTH_SHORT).show()
+                }
+            }) {
                 Text("切换到微信")
             }
         }
