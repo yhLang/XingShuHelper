@@ -120,13 +120,17 @@ class MainActivity : ComponentActivity() {
                         PermissionRequired(onGrant = { requestOverlayPermission() })
                     }
 
-                    Spacer(Modifier.height(24.dp))
-                    HorizontalDivider()
-                    VisionDebugSection()
+                    // 调试入口仅在 debug 包可见，release 包不展示（首页保持干净）。
+                    // 仍保留代码：开发期需要测 qwen-vl-max 视觉识别 / 截屏 OCR 时直接装 debug 包。
+                    if (BuildConfig.DEBUG) {
+                        Spacer(Modifier.height(24.dp))
+                        HorizontalDivider()
+                        VisionDebugSection()
 
-                    Spacer(Modifier.height(8.dp))
-                    HorizontalDivider()
-                    AutoCaptureDebugSection()
+                        Spacer(Modifier.height(8.dp))
+                        HorizontalDivider()
+                        AutoCaptureDebugSection()
+                    }
                 }
             }
         }
@@ -352,7 +356,7 @@ class MainActivity : ComponentActivity() {
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "屏幕侧边的红色「行」字悬浮球已就绪。\n切换到微信后，随时点击悬浮球使用助手。",
+                "悬浮球已显示在屏幕侧边。\n切换到微信后随时点击使用。",
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
