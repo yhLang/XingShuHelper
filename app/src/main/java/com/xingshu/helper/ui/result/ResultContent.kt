@@ -70,7 +70,12 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
             isStreaming = true,
             copied = copied,
             referencedQas = state.referencedQas,
-            onCopy = { /* 流式中不允许复制 */ },
+            onCopy = { /* 流式中不允许复制 AI 回复 */ },
+            onCopyReference = { answer ->
+                // 金标答案是完整的，流式中也可以直接复制（AI 还没说完时金标可能就够用了）
+                copyText(context, answer)
+                copied = true
+            },
             onRegenerate = { viewModel.regenerate() },
             onBack = { viewModel.navigateTo(PanelScreen.MAIN) },
         )
@@ -82,6 +87,10 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
             referencedQas = state.referencedQas,
             onCopy = {
                 copyText(context, genState.text)
+                copied = true
+            },
+            onCopyReference = { answer ->
+                copyText(context, answer)
                 copied = true
             },
             onRegenerate = { viewModel.regenerate() },
@@ -99,6 +108,7 @@ private fun ReplyView(
     copied: Boolean,
     referencedQas: List<ReferencedQa>,
     onCopy: () -> Unit,
+    onCopyReference: (String) -> Unit,
     onRegenerate: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -127,7 +137,7 @@ private fun ReplyView(
                 )
             }
             if (referencedQas.isNotEmpty()) {
-                item { ReferenceSources(items = referencedQas) }
+                item { ReferenceSources(items = referencedQas, onCopy = onCopyReference) }
             }
         }
 
@@ -227,7 +237,7 @@ private fun copyText(context: Context, text: String) {
 }
 
 @Composable
-private fun ReferenceSources(items: List<ReferencedQa>) {
+private fun ReferenceSources(items: List<ReferencedQa>, onCopy: (String) -> Unit) {
     var showAll by remember { mutableStateOf(false) }
     val displayItems = if (showAll) items else items.take(1)
 
@@ -266,7 +276,10 @@ private fun ReferenceSources(items: List<ReferencedQa>) {
                         .fillMaxWidth()
                         .padding(top = 4.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             "${idx + 1}. [${q.scene}]",
                             fontWeight = FontWeight.Medium,
@@ -279,6 +292,22 @@ private fun ReferenceSources(items: List<ReferencedQa>) {
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Spacer(Modifier.weight(1f))
+                        if (q.answer.isNotBlank()) {
+                            FilledTonalButton(
+                                onClick = { onCopy(q.answer) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    contentDescription = "复制金标答案",
+                                    modifier = Modifier.size(12.dp),
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                Text("复制", fontSize = 11.sp)
+                            }
+                        }
                     }
                     Text(
                         text = "Q：$question",

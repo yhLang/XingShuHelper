@@ -7,9 +7,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.xingshu.helper.BuildConfig
 import java.io.File
 
@@ -25,8 +28,22 @@ fun UpdateBanner() {
     var ready by remember { mutableStateOf<File?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    // 启动时检查更新——发现新版本立即触发自动下载（无需点按钮）
-    LaunchedEffect(Unit) {
+    // 检查触发计数：启动时 +1，之后每次 ON_RESUME（从后台切回）再 +1。
+    // 只用 LaunchedEffect(Unit) 的话只会在首次进入组合时检查一次，App 在后台
+    // 待几小时再切回来，永远拿不到新版本——必须重启 App 才检测到。
+    var checkTrigger by remember { mutableStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) checkTrigger++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(checkTrigger) {
+        // 已经在下载或下载完成的，不重复检查（避免反复弹横幅）
+        if (downloading || ready != null) return@LaunchedEffect
         try {
             UpdateChecker.check().collect { s ->
                 when (s) {
