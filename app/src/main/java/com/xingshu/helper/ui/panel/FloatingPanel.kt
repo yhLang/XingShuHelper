@@ -1,5 +1,6 @@
 package com.xingshu.helper.ui.panel
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,8 +17,6 @@ import androidx.compose.runtime.*
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,12 +53,13 @@ fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
     XingShuTheme {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp,
-            shadowElevation = 16.dp
+            tonalElevation = 6.dp,
+            shadowElevation = 18.dp,
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
+                TricolorRail()
                 PanelTopBar(
                     title = when (state.currentScreen) {
                         PanelScreen.MAIN -> "行恕客服助手"
@@ -95,21 +95,51 @@ fun FloatingPanelRoot(viewModel: PanelViewModel, onClose: () -> Unit) {
                             delay(2000)
                             viewModel.clearSnackbar()
                         }
-                        Box(
+                        Surface(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF323232))
-                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.inverseSurface,
+                            tonalElevation = 6.dp,
+                            shadowElevation = 8.dp,
                         ) {
-                            Text(msg, color = Color.White, fontSize = 13.sp)
+                            Text(
+                                msg,
+                                color = MaterialTheme.colorScheme.inverseOnSurface,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            )
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TricolorRail() {
+    Row(modifier = Modifier.fillMaxWidth().height(4.dp)) {
+        Box(
+            modifier = Modifier
+                .weight(7f)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.primary)
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.tertiary)
+        )
+        Box(
+            modifier = Modifier
+                .weight(4f)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.secondary)
+        )
     }
 }
 
@@ -130,28 +160,44 @@ private fun PanelTopBar(
     ) {
         if (currentScreen != PanelScreen.MAIN) {
             TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) {
-                Text("‹ 返回", fontSize = 15.sp)
+                Text("‹ 返回", fontSize = 15.sp, color = MaterialTheme.colorScheme.primary)
             }
         }
         Text(
             text = title,
             modifier = Modifier.weight(1f).padding(start = if (currentScreen != PanelScreen.MAIN) 4.dp else 0.dp),
             fontWeight = FontWeight.SemiBold,
-            fontSize = 17.sp
+            fontSize = 17.sp,
+            color = MaterialTheme.colorScheme.primary,
         )
         if (currentScreen == PanelScreen.MAIN) {
             IconButton(onClick = onSnippets) {
-                Icon(Icons.Default.Bookmark, contentDescription = "常用片段", modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Default.Bookmark,
+                    contentDescription = "常用片段",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
             }
             IconButton(onClick = onSettings) {
-                Icon(Icons.Default.Settings, contentDescription = "设置", modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Default.Settings,
+                    contentDescription = "设置",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         IconButton(onClick = onClose) {
-            Icon(Icons.Default.Close, contentDescription = "关闭", modifier = Modifier.size(20.dp))
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "关闭",
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
-    HorizontalDivider()
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 @Composable
@@ -237,130 +283,136 @@ private fun CaptureSection(state: PanelUiState, viewModel: PanelViewModel, isLoa
     val isVisionLoading = state.visionState is VisionState.Loading
     val busy = isCapturing || isVisionLoading || isLoading
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Text(
-            "📸 截屏识别（长对话备用）",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = if (hasProjection) {
-                "已授权，点击直接抓取下方微信对话"
-            } else {
-                "首次需授权截屏，之后可一键直抓"
-            },
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        OutlinedButton(
-            onClick = { viewModel.startScreenCapture() },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth()
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
-                when {
-                    isCapturing && !isVisionLoading -> "正在截屏…"
-                    isVisionLoading -> "正在识别对话…"
-                    else -> "截屏识别"
-                }
+                "📸 截屏识别（长对话备用）",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
             )
-        }
-        if (state.dialogMessages.isNotEmpty()) {
             Text(
-                "上次识别：${state.dialogMessages.size} 条（客户 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.CUSTOMER }} / 我 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.ME }}）",
+                text = if (hasProjection) {
+                    "已授权，点击直接抓取下方微信对话"
+                } else {
+                    "首次需授权截屏，之后可一键直抓"
+                },
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            OutlinedButton(
+                onClick = { viewModel.startScreenCapture() },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    when {
+                        isCapturing && !isVisionLoading -> "正在截屏…"
+                        isVisionLoading -> "正在识别对话…"
+                        else -> "截屏识别"
+                    }
+                )
+            }
+            if (state.dialogMessages.isNotEmpty()) {
+                Text(
+                    "上次识别：${state.dialogMessages.size} 条（客户 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.CUSTOMER }} / 我 ${state.dialogMessages.count { it.role == com.xingshu.helper.data.model.DialogRole.ME }}）",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun ClipboardSection(state: PanelUiState, viewModel: PanelViewModel, isLoading: Boolean) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.primaryContainer)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.32f)),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                "📋 剪贴板识别（推荐）",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.weight(1f)
-            )
-            // 面板打开时已自动读过一次；只有用户在微信复制了新内容后回来才需要手动刷新
-            TextButton(
-                onClick = { viewModel.readClipboard() },
-                enabled = !isLoading,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("刷新", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(
+                    "📋 剪贴板识别（推荐）",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.weight(1f)
+                )
+                // 面板打开时已自动读过一次；只有用户在微信复制了新内容后回来才需要手动刷新
+                TextButton(
+                    onClick = { viewModel.readClipboard() },
+                    enabled = !isLoading,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Text("刷新", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
             }
-        }
-        Text(
-            "在微信长按客户消息→复制后回来，下方会自动显示",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onPrimaryContainer
-        )
-
-        when (state.clipboardStatus) {
-            ClipboardStatus.EMPTY -> Text(
-                "未检测到内容，请先在微信复制客户消息",
-                fontSize = 12.sp,
+            Text(
+                "在微信长按客户消息→复制后回来，下方会自动显示",
+                fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
-            ClipboardStatus.DUPLICATE -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
+
+            when (state.clipboardStatus) {
+                ClipboardStatus.EMPTY -> Text(
+                    "未检测到内容，请先在微信复制客户消息",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                ClipboardStatus.DUPLICATE -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        state.clipboardPreview,
+                        fontSize = 13.sp,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    Text(
+                        "⚠ 该内容已在本轮中",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                ClipboardStatus.TOO_LONG -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        state.clipboardPreview,
+                        fontSize = 13.sp,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    Text(
+                        "内容较长（${state.clipboardPreview.length} 字），建议只保留关键问题",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                ClipboardStatus.OK -> Text(
                     state.clipboardPreview,
-                    fontSize = 13.sp,
-                    maxLines = 4,
+                    fontSize = 14.sp,
+                    maxLines = 5,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
-                Text(
-                    "⚠ 该内容已在本轮中",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.error,
-                )
             }
-            ClipboardStatus.TOO_LONG -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    state.clipboardPreview,
-                    fontSize = 13.sp,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-                Text(
-                    "内容较长（${state.clipboardPreview.length} 字），建议只保留关键问题",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            ClipboardStatus.OK -> Text(
-                state.clipboardPreview,
-                fontSize = 14.sp,
-                maxLines = 5,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
         }
     }
 }
@@ -409,7 +461,10 @@ private fun ActionButtons(state: PanelUiState, viewModel: PanelViewModel, isLoad
             onClick = { viewModel.generateFromBasket() },
             enabled = canGenerate && state.corpusReady,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.secondary,
+                contentColor = MaterialTheme.colorScheme.onSecondary,
+            )
         ) { Text(buttonLabel) }
     }
 }
@@ -420,7 +475,17 @@ private fun DialogBubble(message: DialogMessage, onDelete: () -> Unit) {
     val bubbleColor = if (isCustomer) {
         MaterialTheme.colorScheme.surfaceVariant
     } else {
-        Color(0xFFCEEAB5) // 微信绿，浅色一点便于阅读
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val bubbleTextColor = if (isCustomer) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    val roleColor = if (isCustomer) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.secondary
     }
     val alignment = if (isCustomer) Alignment.CenterStart else Alignment.CenterEnd
 
@@ -440,24 +505,26 @@ private fun DialogBubble(message: DialogMessage, onDelete: () -> Unit) {
                     )
                 }
             }
-            Column(
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(bubbleColor)
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            Surface(
+                modifier = Modifier.weight(1f, fill = false),
+                shape = MaterialTheme.shapes.medium,
+                color = bubbleColor,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
-                Text(
-                    if (isCustomer) "客户" else "我",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    message.text,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                    color = Color(0xFF222222)
-                )
+                Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
+                    Text(
+                        if (isCustomer) "客户" else "我",
+                        fontSize = 10.sp,
+                        color = roleColor,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        message.text,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        color = bubbleTextColor
+                    )
+                }
             }
             if (isCustomer) {
                 IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
@@ -475,28 +542,32 @@ private fun DialogBubble(message: DialogMessage, onDelete: () -> Unit) {
 
 @Composable
 private fun BasketItem(message: BasketMessage, onDelete: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Text(
-            message.content,
-            modifier = Modifier.weight(1f),
-            fontSize = 13.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-            Icon(
-                Icons.Default.Delete,
-                contentDescription = "删除",
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                message.content,
+                modifier = Modifier.weight(1f),
+                fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface,
             )
+            IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "删除",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

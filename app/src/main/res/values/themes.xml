@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.XingShuHelper" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.XingShuHelper" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">@color/paper_background</item>
+        <item name="android:navigationBarColor">@color/paper_background</item>
+        <item name="android:colorAccent">@color/qing_tian_blue</item>
+    </style>
 </resources>

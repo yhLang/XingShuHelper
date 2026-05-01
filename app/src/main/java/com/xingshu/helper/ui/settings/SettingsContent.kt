@@ -1,5 +1,6 @@
 package com.xingshu.helper.ui.settings
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -53,7 +54,7 @@ fun SettingsContent(
         )
 
         if (corpusSyncConfigured) {
-            HorizontalDivider()
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SectionTitle("话术库同步")
             CorpusSyncRow(
                 version = corpusVersion,
@@ -62,7 +63,7 @@ fun SettingsContent(
             )
         }
 
-        HorizontalDivider()
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         SectionTitle("关于")
         Text(
@@ -72,7 +73,7 @@ fun SettingsContent(
             lineHeight = 20.sp
         )
 
-        HorizontalDivider()
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         SectionTitle("隐私说明")
         Text(
@@ -94,9 +95,14 @@ private fun AccountRow(
 ) {
     Surface(
         onClick = onClick,
-        shape = MaterialTheme.shapes.medium,
+        shape = MaterialTheme.shapes.large,
         color = if (selected) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outlineVariant
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -109,7 +115,9 @@ private fun AccountRow(
                 Text(
                     text = account.displayName,
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
+                    fontSize = 14.sp,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
                     text = account.brandName,
@@ -123,7 +131,12 @@ private fun AccountRow(
 
 @Composable
 private fun SectionTitle(title: String) {
-    Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+    Text(
+        title,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 15.sp,
+        color = MaterialTheme.colorScheme.primary,
+    )
 }
 
 @Composable
@@ -145,11 +158,20 @@ private fun CorpusSyncRow(
         is CorpusSyncManager.State.Error -> "失败：${state.message}" to MaterialTheme.colorScheme.error
     }
     val busy = state is CorpusSyncManager.State.Checking || state is CorpusSyncManager.State.Downloading
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(statusText, fontSize = 12.sp, color = statusColor)
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Button(onClick = onCheck, enabled = !busy) {
-                Text(if (busy) "请稍候" else "检查金标更新")
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(statusText, fontSize = 12.sp, color = statusColor)
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Button(onClick = onCheck, enabled = !busy) {
+                    Text(if (busy) "请稍候" else "检查金标更新")
+                }
             }
         }
     }

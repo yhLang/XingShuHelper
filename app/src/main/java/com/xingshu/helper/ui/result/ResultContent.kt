@@ -3,10 +3,10 @@ package com.xingshu.helper.ui.result
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Refresh
@@ -16,7 +16,7 @@ import androidx.compose.runtime.*
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -77,56 +77,56 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                if (state.factCheckIssues.isNotEmpty()) {
-                    item { FactCheckWarning(issues = state.factCheckIssues) }
-                }
-                if (result.isSensitive) {
-                    item { SensitiveWarning(note = result.sensitiveNote) }
-                }
-                item {
-                    ReplyCard(
-                        label = "简短版",
-                        labelColor = MaterialTheme.colorScheme.primary,
-                        content = result.shortVersion,
-                        copied = copiedLabel == "short",
-                        onCopy = {
-                            copyText(context, result.shortVersion)
-                            copiedLabel = "short"
-                        }
-                    )
-                }
-                item {
-                    ReplyCard(
-                        label = "自然版",
-                        labelColor = MaterialTheme.colorScheme.secondary,
-                        content = result.naturalVersion,
-                        copied = copiedLabel == "natural",
-                        onCopy = {
-                            copyText(context, result.naturalVersion)
-                            copiedLabel = "natural"
-                        }
-                    )
-                }
-                item {
-                    ReplyCard(
-                        label = "邀约版",
-                        labelColor = MaterialTheme.colorScheme.tertiary,
-                        content = result.inviteVersion,
-                        copied = copiedLabel == "invite",
-                        onCopy = {
-                            copyText(context, result.inviteVersion)
-                            copiedLabel = "invite"
-                        }
-                    )
-                }
-                item { MetaInfo(result = result) }
-                if (state.referencedQas.isNotEmpty()) {
-                    item { ReferenceSources(items = state.referencedQas) }
-                }
+                    if (state.factCheckIssues.isNotEmpty()) {
+                        item { FactCheckWarning(issues = state.factCheckIssues) }
+                    }
+                    if (result.isSensitive) {
+                        item { SensitiveWarning(note = result.sensitiveNote) }
+                    }
+                    item {
+                        ReplyCard(
+                            label = "简短版",
+                            labelColor = MaterialTheme.colorScheme.primary,
+                            content = result.shortVersion,
+                            copied = copiedLabel == "short",
+                            onCopy = {
+                                copyText(context, result.shortVersion)
+                                copiedLabel = "short"
+                            }
+                        )
+                    }
+                    item {
+                        ReplyCard(
+                            label = "自然版",
+                            labelColor = MaterialTheme.colorScheme.secondary,
+                            content = result.naturalVersion,
+                            copied = copiedLabel == "natural",
+                            onCopy = {
+                                copyText(context, result.naturalVersion)
+                                copiedLabel = "natural"
+                            }
+                        )
+                    }
+                    item {
+                        ReplyCard(
+                            label = "邀约版",
+                            labelColor = MaterialTheme.colorScheme.tertiary,
+                            content = result.inviteVersion,
+                            copied = copiedLabel == "invite",
+                            onCopy = {
+                                copyText(context, result.inviteVersion)
+                                copiedLabel = "invite"
+                            }
+                        )
+                    }
+                    item { MetaInfo(result = result) }
+                    if (state.referencedQas.isNotEmpty()) {
+                        item { ReferenceSources(items = state.referencedQas) }
+                    }
                 }
 
                 // 固定底部按钮栏：内容滚动时按钮不消失，操作摩擦更低
-                HorizontalDivider()
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -166,64 +166,70 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
  */
 @Composable
 private fun FactCheckWarning(issues: List<String>) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.errorContainer)
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.errorContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.28f)),
     ) {
-        Icon(
-            Icons.Default.Warning,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(18.dp).padding(top = 2.dp)
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                "⚠ 这些数字不在话术库里，可能是 AI 编造，请核对：",
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.error,
-                fontSize = 13.sp
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                Icons.Default.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(18.dp).padding(top = 2.dp)
             )
-            Text(
-                issues.joinToString("、"),
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                lineHeight = 18.sp
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "⚠ 这些数字不在话术库里，可能是 AI 编造，请核对：",
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 13.sp
+                )
+                Text(
+                    issues.joinToString("、"),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    lineHeight = 18.sp
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun SensitiveWarning(note: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.errorContainer)
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.errorContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.28f)),
     ) {
-        Icon(
-            Icons.Default.Warning,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(18.dp).padding(top = 2.dp)
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                "敏感问题 — 建议人工确认后再发送",
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.error,
-                fontSize = 13.sp
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                Icons.Default.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(18.dp).padding(top = 2.dp)
             )
-            if (note.isNotBlank()) {
-                Text(note, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "敏感问题 — 建议人工确认后再发送",
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 13.sp
+                )
+                if (note.isNotBlank()) {
+                    Text(note, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+                }
             }
         }
     }
@@ -232,62 +238,74 @@ private fun SensitiveWarning(note: String) {
 @Composable
 private fun ReplyCard(
     label: String,
-    labelColor: androidx.compose.ui.graphics.Color,
+    labelColor: Color,
     content: String,
     copied: Boolean,
     onCopy: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, labelColor.copy(alpha = 0.38f)),
+        tonalElevation = 1.dp,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(label, fontWeight = FontWeight.SemiBold, color = labelColor, fontSize = 13.sp)
-            FilledTonalButton(
-                onClick = onCopy,
-                enabled = !copied,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                modifier = Modifier.height(30.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (copied) {
-                    Text("已复制 ✓", fontSize = 12.sp)
-                } else {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("复制", fontSize = 12.sp)
+                Text(label, fontWeight = FontWeight.SemiBold, color = labelColor, fontSize = 13.sp)
+                FilledTonalButton(
+                    onClick = onCopy,
+                    enabled = !copied,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    if (copied) {
+                        Text("已复制 ✓", fontSize = 12.sp)
+                    } else {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("复制", fontSize = 12.sp)
+                    }
                 }
             }
+            Text(
+                content,
+                fontSize = 14.sp,
+                lineHeight = 22.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
         }
-        Text(content, fontSize = 14.sp, lineHeight = 22.sp)
     }
 }
 
 @Composable
 private fun MetaInfo(result: GeneratedResult) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        if (result.intent.isNotBlank()) {
-            MetaRow(label = "客户意向", value = result.intent)
-        }
-        if (result.nextStep.isNotBlank()) {
-            MetaRow(label = "下一步", value = result.nextStep)
-        }
-        if (result.humanConfirm.isNotBlank()) {
-            MetaRow(label = "人工确认", value = result.humanConfirm, isWarning = true)
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (result.intent.isNotBlank()) {
+                MetaRow(label = "客户意向", value = result.intent)
+            }
+            if (result.nextStep.isNotBlank()) {
+                MetaRow(label = "下一步", value = result.nextStep)
+            }
+            if (result.humanConfirm.isNotBlank()) {
+                MetaRow(label = "人工确认", value = result.humanConfirm, isWarning = true)
+            }
         }
     }
 }
@@ -323,65 +341,69 @@ private fun ReferenceSources(items: List<ReferencedQa>) {
     var showAll by remember { mutableStateOf(false) }
     val displayItems = if (showAll) items else items.take(1)
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(
-                "参考金标（${items.size} 条相似历史）",
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 13.sp,
-                modifier = Modifier.weight(1f)
-            )
-            if (items.size > 1) {
-                TextButton(onClick = { showAll = !showAll }, contentPadding = PaddingValues(0.dp)) {
-                    Text(if (showAll) "收起" else "展开其余 ${items.size - 1}", fontSize = 12.sp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "参考金标（${items.size} 条相似历史）",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                if (items.size > 1) {
+                    TextButton(onClick = { showAll = !showAll }, contentPadding = PaddingValues(0.dp)) {
+                        Text(if (showAll) "收起" else "展开其余 ${items.size - 1}", fontSize = 12.sp)
+                    }
                 }
             }
-        }
-        displayItems.forEachIndexed { idx, ref ->
-            val q = ref.item
-            val question = q.questions.firstOrNull().orEmpty()
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            displayItems.forEachIndexed { idx, ref ->
+                val q = ref.item
+                val question = q.questions.firstOrNull().orEmpty()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${idx + 1}. [${q.scene}]",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "相似度 ${"%.2f".format(ref.score)}",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Text(
-                        "${idx + 1}. [${q.scene}]",
-                        fontWeight = FontWeight.Medium,
+                        text = "Q：$question",
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "相似度 ${"%.2f".format(ref.score)}",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Text(
-                    text = "Q：$question",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    lineHeight = 16.sp
-                )
-                if (q.answer.isNotBlank()) {
-                    Text(
-                        text = "A：${q.answer}",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 16.sp
                     )
+                    if (q.answer.isNotBlank()) {
+                        Text(
+                            text = "A：${q.answer}",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 16.sp
+                        )
+                    }
                 }
             }
         }

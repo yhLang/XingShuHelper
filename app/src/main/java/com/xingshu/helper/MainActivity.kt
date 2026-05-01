@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
         }
 
         XingShuTheme {
-            Scaffold { padding ->
+            Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
                 Column(
                     modifier = Modifier
                         .fillMaxSize()

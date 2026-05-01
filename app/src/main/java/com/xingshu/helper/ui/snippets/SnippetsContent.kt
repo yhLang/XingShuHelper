@@ -3,17 +3,15 @@ package com.xingshu.helper.ui.snippets
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -86,9 +84,14 @@ fun SnippetsContent(snippets: List<Snippet>) {
 private fun SnippetCard(snippet: Snippet, copied: Boolean, onCopy: () -> Unit) {
     Surface(
         onClick = onCopy,
-        shape = RoundedCornerShape(10.dp),
+        shape = MaterialTheme.shapes.large,
         color = if (copied) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(
+            1.dp,
+            if (copied) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outlineVariant
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -100,32 +103,35 @@ private fun SnippetCard(snippet: Snippet, copied: Boolean, onCopy: () -> Unit) {
                     snippet.title,
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp,
+                    color = if (copied) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f)
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(
-                            if (copied) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surface
-                        )
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = if (copied) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.surface,
+                    border = if (copied) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
-                    Icon(
-                        Icons.Default.ContentCopy,
-                        contentDescription = null,
-                        modifier = Modifier.size(12.dp),
-                        tint = if (copied) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(Modifier.width(2.dp))
-                    Text(
-                        if (copied) "已复制" else "复制",
-                        fontSize = 11.sp,
-                        color = if (copied) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.ContentCopy,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = if (copied) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Text(
+                            if (copied) "已复制" else "复制",
+                            fontSize = 11.sp,
+                            color = if (copied) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
             }
             Text(

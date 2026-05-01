@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#00008B</color>
+    <color name="qing_tian_blue">#001A57</color>
+    <color name="qing_tian_blue_deep">#000F3D</color>
+    <color name="white_sun">#FFFFFB</color>
+    <color name="paper_background">#FFFCF6</color>
+    <color name="full_ground_red">#B01220</color>
+    <color name="seal_gold">#7C5700</color>
+    <color name="ic_launcher_background">#001A57</color>
 </resources>
