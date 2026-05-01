@@ -9,8 +9,10 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -175,7 +177,10 @@ class AIRepository {
             val choices = obj["choices"] as? JsonArray
             val first = choices?.firstOrNull() as? JsonObject ?: return null
             val delta = first["delta"] as? JsonObject ?: return null
-            delta["content"]?.jsonPrimitive?.content
+            // 注意：deepseek 第一个 chunk 通常是 {"role":"assistant","content":null}，content 是
+            // JsonNull。直接 .jsonPrimitive.content 会返回字符串 "null" 把它当文本累积进去。
+            // 必须用 contentOrNull，它对 JsonNull 返回 Kotlin null。
+            (delta["content"] as? JsonPrimitive)?.contentOrNull
         } catch (_: Exception) {
             null
         }
