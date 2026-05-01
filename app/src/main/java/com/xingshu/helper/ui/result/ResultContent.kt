@@ -413,7 +413,12 @@ private fun copyText(context: Context, text: String) {
 
 @Composable
 private fun ReferenceSources(items: List<ReferencedQa>) {
-    var expanded by remember { mutableStateOf(false) }
+    // 默认展示 top-1：让客服一眼看到 LLM 是基于哪条金标生成的，
+    // 高相似度时还能直接对照（甚至选择直接用金标原文）。
+    // 剩下的几条折叠在"展开更多"里，需要时再看。
+    var showAll by remember { mutableStateOf(false) }
+    val displayItems = if (showAll) items else items.take(1)
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -427,52 +432,52 @@ private fun ReferenceSources(items: List<ReferencedQa>) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "参考话术（${items.size} 条历史对话）",
+                "参考金标（${items.size} 条相似历史）",
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 13.sp,
                 modifier = Modifier.weight(1f)
             )
-            TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {
-                Text(if (expanded) "收起" else "展开", fontSize = 12.sp)
+            if (items.size > 1) {
+                TextButton(onClick = { showAll = !showAll }, contentPadding = PaddingValues(0.dp)) {
+                    Text(if (showAll) "收起" else "展开其余 ${items.size - 1}", fontSize = 12.sp)
+                }
             }
         }
-        if (expanded) {
-            items.forEachIndexed { idx, ref ->
-                val q = ref.item
-                val question = q.questions.firstOrNull().orEmpty()
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "${idx + 1}. [${q.scene}]",
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "相似度 ${"%.2f".format(ref.score)}",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+        displayItems.forEachIndexed { idx, ref ->
+            val q = ref.item
+            val question = q.questions.firstOrNull().orEmpty()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "Q：$question",
+                        "${idx + 1}. [${q.scene}]",
+                        fontWeight = FontWeight.Medium,
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "相似度 ${"%.2f".format(ref.score)}",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(
+                    text = "Q：$question",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    lineHeight = 16.sp
+                )
+                if (q.answer.isNotBlank()) {
+                    Text(
+                        text = "A：${q.answer}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 16.sp
                     )
-                    if (q.answer.isNotBlank()) {
-                        Text(
-                            text = "A：${q.answer}",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 16.sp
-                        )
-                    }
                 }
             }
         }
