@@ -7,10 +7,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.delay
@@ -20,7 +20,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.xingshu.helper.data.model.GeneratedResult
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.ui.panel.PanelUiState
@@ -34,9 +33,8 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
 
     LaunchedEffect(copied) {
         if (copied) {
-            // 复制成功 → 短暂显示 ✓ 反馈 → 标记结果已消费 → 自动关闭面板，
-            // 让用户切回微信粘贴。下次再开悬浮窗会回首页开始新一轮，不会
-            // 恢复到上次已发过的结果页（误关保留逻辑只针对"没复制就关"的场景）。
+            // 复制成功 → 短暂显示 ✓ → 标记结果已消费 → 自动关闭面板，
+            // 让用户切回微信粘贴。下次再开悬浮窗会回首页开始新一轮。
             delay(600)
             viewModel.markResultConsumed()
             onClose()
@@ -49,7 +47,7 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
             Box(modifier = Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     CircularProgressIndicator()
-                    Text("正在生成回复…", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("正在思考…", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -67,142 +65,95 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
             }
         }
 
-        is GenerateState.Success -> {
-            val result = genState.result
+        is GenerateState.Streaming -> ReplyView(
+            text = genState.text,
+            isStreaming = true,
+            copied = copied,
+            referencedQas = state.referencedQas,
+            onCopy = { /* 流式中不允许复制 */ },
+            onRegenerate = { viewModel.regenerate() },
+            onBack = { viewModel.navigateTo(PanelScreen.MAIN) },
+        )
 
-            Column(modifier = Modifier.fillMaxWidth()) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    if (state.factCheckIssues.isNotEmpty()) {
-                        item { FactCheckWarning(issues = state.factCheckIssues) }
-                    }
-                    if (result.isSensitive) {
-                        item { SensitiveWarning(note = result.sensitiveNote) }
-                    }
-                    item {
-                        ReplyCard(
-                            content = result.reply,
-                            copied = copied,
-                            onCopy = {
-                                copyText(context, result.reply)
-                                copied = true
-                            }
-                        )
-                    }
-                    item { MetaInfo(result = result) }
-                    if (state.referencedQas.isNotEmpty()) {
-                        item { ReferenceSources(items = state.referencedQas) }
-                    }
-                }
-
-                // 固定底部按钮栏：内容滚动时按钮不消失，操作摩擦更低
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { viewModel.regenerate() },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            "再来一版（重新生成）",
-                            fontSize = 14.sp
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = { viewModel.navigateTo(PanelScreen.MAIN) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("返回继续")
-                    }
-                }
-            }
-        }
+        is GenerateState.Success -> ReplyView(
+            text = genState.text,
+            isStreaming = false,
+            copied = copied,
+            referencedQas = state.referencedQas,
+            onCopy = {
+                copyText(context, genState.text)
+                copied = true
+            },
+            onRegenerate = { viewModel.regenerate() },
+            onBack = { viewModel.navigateTo(PanelScreen.MAIN) },
+        )
 
         else -> {}
     }
 }
 
-/**
- * 防幻觉警告：列出回复里出现但不在结构化 KB 里的价格/时段。
- * 不阻止客服复制，只是醒目提示要核对。比 SensitiveWarning 更严肃，因为
- * 这些字段如果发错（比如价格说错），客户会照着填到合同/付款里。
- */
 @Composable
-private fun FactCheckWarning(issues: List<String>) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.errorContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.28f)),
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            Icon(
-                Icons.Default.Warning,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(18.dp).padding(top = 2.dp)
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    "⚠ 这些数字不在话术库里，可能是 AI 编造，请核对：",
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 13.sp
-                )
-                Text(
-                    issues.joinToString("、"),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    lineHeight = 18.sp
-                )
-            }
+private fun ReplyView(
+    text: String,
+    isStreaming: Boolean,
+    copied: Boolean,
+    referencedQas: List<ReferencedQa>,
+    onCopy: () -> Unit,
+    onRegenerate: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val listState = rememberLazyListState()
+
+    // 流式中：每次 text 增长就把列表滚到底部，模拟"自动跟读"。
+    LaunchedEffect(text, isStreaming) {
+        if (isStreaming && text.isNotEmpty()) {
+            listState.animateScrollToItem(0)  // 内容只有 1-2 个 item，滚到第一项确保 ReplyCard 顶部可见
         }
     }
-}
 
-@Composable
-private fun SensitiveWarning(note: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.errorContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.28f)),
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.Top
+    Column(modifier = Modifier.fillMaxWidth()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(
-                Icons.Default.Warning,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(18.dp).padding(top = 2.dp)
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    "敏感问题 — 建议人工确认后再发送",
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 13.sp
+            item {
+                ReplyCard(
+                    content = text,
+                    isStreaming = isStreaming,
+                    copied = copied,
+                    onCopy = onCopy,
                 )
-                if (note.isNotBlank()) {
-                    Text(note, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
-                }
+            }
+            if (referencedQas.isNotEmpty()) {
+                item { ReferenceSources(items = referencedQas) }
+            }
+        }
+
+        // 固定底部按钮栏：流式中禁用"再来一版"防误触；返回随时可点
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onRegenerate,
+                enabled = !isStreaming,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("再来一版（重新生成）", fontSize = 14.sp)
+            }
+            OutlinedButton(
+                onClick = onBack,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("返回继续")
             }
         }
     }
@@ -211,6 +162,7 @@ private fun SensitiveWarning(note: String) {
 @Composable
 private fun ReplyCard(
     content: String,
+    isStreaming: Boolean,
     copied: Boolean,
     onCopy: () -> Unit,
 ) {
@@ -230,15 +182,23 @@ private fun ReplyCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "AI 回复",
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 13.sp,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "AI 回复",
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 13.sp,
+                    )
+                    if (isStreaming) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 1.5.dp,
+                        )
+                    }
+                }
                 FilledTonalButton(
                     onClick = onCopy,
-                    enabled = !copied,
+                    enabled = !copied && !isStreaming,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     modifier = Modifier.height(30.dp)
                 ) {
@@ -261,49 +221,6 @@ private fun ReplyCard(
     }
 }
 
-@Composable
-private fun MetaInfo(result: GeneratedResult) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            if (result.intent.isNotBlank()) {
-                MetaRow(label = "客户意向", value = result.intent)
-            }
-            if (result.nextStep.isNotBlank()) {
-                MetaRow(label = "下一步", value = result.nextStep)
-            }
-            if (result.humanConfirm.isNotBlank()) {
-                MetaRow(label = "人工确认", value = result.humanConfirm, isWarning = true)
-            }
-        }
-    }
-}
-
-@Composable
-private fun MetaRow(label: String, value: String, isWarning: Boolean = false) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            label,
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.widthIn(min = 56.dp)
-        )
-        Text(
-            value,
-            fontSize = 12.sp,
-            color = if (isWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-        )
-    }
-}
-
 private fun copyText(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("reply", text))
@@ -311,9 +228,6 @@ private fun copyText(context: Context, text: String) {
 
 @Composable
 private fun ReferenceSources(items: List<ReferencedQa>) {
-    // 默认展示 top-1：让客服一眼看到 LLM 是基于哪条金标生成的，
-    // 高相似度时还能直接对照（甚至选择直接用金标原文）。
-    // 剩下的几条折叠在"展开更多"里，需要时再看。
     var showAll by remember { mutableStateOf(false) }
     val displayItems = if (showAll) items else items.take(1)
 

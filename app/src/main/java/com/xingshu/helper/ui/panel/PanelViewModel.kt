@@ -11,7 +11,6 @@ import com.xingshu.helper.data.account.BusinessAccount
 import com.xingshu.helper.data.model.BasketMessage
 import com.xingshu.helper.data.model.DialogMessage
 import com.xingshu.helper.data.model.DialogRole
-import com.xingshu.helper.data.model.GeneratedResult
 import com.xingshu.helper.data.model.GenerateState
 import com.xingshu.helper.data.model.PanelScreen
 import com.xingshu.helper.data.model.QAItem
@@ -20,7 +19,6 @@ import com.xingshu.helper.data.model.VisionState
 import com.xingshu.helper.data.repository.AIRepository
 import com.xingshu.helper.data.repository.CorpusSyncManager
 import com.xingshu.helper.data.repository.EmbeddingRepository
-import com.xingshu.helper.data.repository.FactChecker
 import com.xingshu.helper.data.repository.QACorpusLoader
 import com.xingshu.helper.data.repository.SnippetRepository
 import com.xingshu.helper.data.repository.StructuredKnowledgeBase
@@ -57,8 +55,6 @@ data class PanelUiState(
     val corpusSync: CorpusSyncManager.State = CorpusSyncManager.State.Idle,
     /** 当前账号本地已同步的金标版本号；0 表示尚未同步过（用 APK assets 兜底）。 */
     val corpusVersion: Int = 0,
-    /** 防幻觉校验：本次生成的回复里疑似虚构的价格/时段片段；空表示全部命中 KB。 */
-    val factCheckIssues: List<String> = emptyList(),
 )
 
 /** 暂存最近一次生成的输入，便于用户在结果页选择"结合 AI 重跑"。 */
@@ -362,11 +358,9 @@ class PanelViewModel(
     }
 
     /**
-     * 默认入口：先判断是否结构化查询（价格/时段/地址）。
-     *
-     * 不再有路由分叉。每次都：检索金标 → 注入 system prompt（结构化 KB + 金标样本）→ LLM 生成三版回复。
-     * 金标量级太小（141/73 条），无法覆盖客户问法长尾，"先 RAG 直答"的快路径反而藏起了 LLM 综合能力。
-     * 默认走 LLM，金标作 in-context 样本提供语气，结构化 KB 提供事实，FactChecker 兜底防价格幻觉。
+     * 主入口：检索金标 → 注入 system prompt（结构化 KB + 金标样本）→ LLM 流式生成回复正文。
+     * 金标量级太小（141/73 条），无法覆盖客户问法长尾。金标作 in-context 样本提供语气，
+     * 结构化 KB 提供事实，输出走 SSE 流式纯文本（路线 A）。
      */
     private fun doGenerate(messages: List<String>) {
         _state.update { it.copy(lastQuery = LastQuery.Messages(messages)) }
@@ -438,15 +432,14 @@ class PanelViewModel(
 
     private fun collectGenerateState(state: GenerateState) {
         _state.update { it.copy(generateState = state) }
-        if (state is GenerateState.Success) {
-            // 防幻觉校验：在回复正文里查价格/时段是否落在结构化 KB 里
-            val issues = FactChecker.check(state.result.reply, currentStructuredContext)
-            if (issues.isNotEmpty()) {
-                android.util.Log.w("PanelViewModel", "factCheck 疑似虚构：$issues")
-            }
-            _state.update { it.copy(currentScreen = PanelScreen.RESULT, factCheckIssues = issues) }
-        } else if (state is GenerateState.Error) {
-            _state.update { it.copy(currentScreen = PanelScreen.RESULT, factCheckIssues = emptyList()) }
+        // 流式：第一时间切到结果页让用户看到进度（spinner → 打字 → 完整回复）。
+        // Loading / Streaming / Success / Error 都让结果页接管，UI 内部根据具体子状态渲染。
+        if (state is GenerateState.Loading ||
+            state is GenerateState.Streaming ||
+            state is GenerateState.Success ||
+            state is GenerateState.Error
+        ) {
+            _state.update { it.copy(currentScreen = PanelScreen.RESULT) }
         }
     }
 
@@ -467,7 +460,6 @@ class PanelViewModel(
                 currentScreen = PanelScreen.MAIN,
                 referencedQas = emptyList(),
                 lastQuery = null,
-                factCheckIssues = emptyList(),
             )
         }
     }

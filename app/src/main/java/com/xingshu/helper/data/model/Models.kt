@@ -16,19 +16,16 @@ data class QAItem(
     val riskNote: String = "",
 )
 
-data class GeneratedResult(
-    val isSensitive: Boolean = false,
-    val sensitiveNote: String = "",
-    val reply: String = "",
-    val intent: String = "",
-    val nextStep: String = "",
-    val humanConfirm: String = "",
-)
-
 sealed class GenerateState {
     data object Idle : GenerateState()
     data object Loading : GenerateState()
-    data class Success(val result: GeneratedResult) : GenerateState()
+
+    /** 流式中：text 是已经累计到的回复正文。复制按钮在该状态下应禁用。 */
+    data class Streaming(val text: String) : GenerateState()
+
+    /** 流式结束：text 是最终回复正文。复制按钮启用。 */
+    data class Success(val text: String) : GenerateState()
+
     data class Error(val message: String) : GenerateState()
 }
 
