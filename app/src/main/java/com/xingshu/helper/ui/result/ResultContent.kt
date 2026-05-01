@@ -16,7 +16,6 @@ import androidx.compose.runtime.*
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -31,17 +30,17 @@ import com.xingshu.helper.ui.panel.ReferencedQa
 @Composable
 fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () -> Unit = {}) {
     val context = LocalContext.current
-    var copiedLabel by remember { mutableStateOf<String?>(null) }
+    var copied by remember { mutableStateOf(false) }
 
-    LaunchedEffect(copiedLabel) {
-        if (copiedLabel != null) {
+    LaunchedEffect(copied) {
+        if (copied) {
             // 复制成功 → 短暂显示 ✓ 反馈 → 标记结果已消费 → 自动关闭面板，
             // 让用户切回微信粘贴。下次再开悬浮窗会回首页开始新一轮，不会
             // 恢复到上次已发过的结果页（误关保留逻辑只针对"没复制就关"的场景）。
             delay(600)
             viewModel.markResultConsumed()
             onClose()
-            copiedLabel = null
+            copied = false
         }
     }
 
@@ -85,37 +84,11 @@ fun ResultContent(state: PanelUiState, viewModel: PanelViewModel, onClose: () ->
                     }
                     item {
                         ReplyCard(
-                            label = "简短版",
-                            labelColor = MaterialTheme.colorScheme.primary,
-                            content = result.shortVersion,
-                            copied = copiedLabel == "short",
+                            content = result.reply,
+                            copied = copied,
                             onCopy = {
-                                copyText(context, result.shortVersion)
-                                copiedLabel = "short"
-                            }
-                        )
-                    }
-                    item {
-                        ReplyCard(
-                            label = "自然版",
-                            labelColor = MaterialTheme.colorScheme.secondary,
-                            content = result.naturalVersion,
-                            copied = copiedLabel == "natural",
-                            onCopy = {
-                                copyText(context, result.naturalVersion)
-                                copiedLabel = "natural"
-                            }
-                        )
-                    }
-                    item {
-                        ReplyCard(
-                            label = "邀约版",
-                            labelColor = MaterialTheme.colorScheme.tertiary,
-                            content = result.inviteVersion,
-                            copied = copiedLabel == "invite",
-                            onCopy = {
-                                copyText(context, result.inviteVersion)
-                                copiedLabel = "invite"
+                                copyText(context, result.reply)
+                                copied = true
                             }
                         )
                     }
@@ -237,8 +210,6 @@ private fun SensitiveWarning(note: String) {
 
 @Composable
 private fun ReplyCard(
-    label: String,
-    labelColor: Color,
     content: String,
     copied: Boolean,
     onCopy: () -> Unit,
@@ -247,7 +218,7 @@ private fun ReplyCard(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, labelColor.copy(alpha = 0.38f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)),
         tonalElevation = 1.dp,
     ) {
         Column(
@@ -259,7 +230,12 @@ private fun ReplyCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(label, fontWeight = FontWeight.SemiBold, color = labelColor, fontSize = 13.sp)
+                Text(
+                    "AI 回复",
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 13.sp,
+                )
                 FilledTonalButton(
                     onClick = onCopy,
                     enabled = !copied,

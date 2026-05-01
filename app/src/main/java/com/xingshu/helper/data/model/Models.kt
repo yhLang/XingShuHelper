@@ -19,9 +19,7 @@ data class QAItem(
 data class GeneratedResult(
     val isSensitive: Boolean = false,
     val sensitiveNote: String = "",
-    val shortVersion: String = "",
-    val naturalVersion: String = "",
-    val inviteVersion: String = "",
+    val reply: String = "",
     val intent: String = "",
     val nextStep: String = "",
     val humanConfirm: String = "",

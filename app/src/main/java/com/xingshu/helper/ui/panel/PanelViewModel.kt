@@ -439,11 +439,8 @@ class PanelViewModel(
     private fun collectGenerateState(state: GenerateState) {
         _state.update { it.copy(generateState = state) }
         if (state is GenerateState.Success) {
-            // 防幻觉校验：把三版回复拼起来，逐个查价格/时段
-            val r = state.result
-            val combined = listOf(r.shortVersion, r.naturalVersion, r.inviteVersion)
-                .joinToString("\n")
-            val issues = FactChecker.check(combined, currentStructuredContext)
+            // 防幻觉校验：在回复正文里查价格/时段是否落在结构化 KB 里
+            val issues = FactChecker.check(state.result.reply, currentStructuredContext)
             if (issues.isNotEmpty()) {
                 android.util.Log.w("PanelViewModel", "factCheck 疑似虚构：$issues")
             }

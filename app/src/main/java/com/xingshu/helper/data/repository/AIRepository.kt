@@ -133,7 +133,7 @@ class AIRepository {
             logCacheUsage(responseBody)
 
             val result = parseResponse(responseBody)
-            if (result != null && (result.shortVersion.isNotBlank() || result.naturalVersion.isNotBlank() || result.inviteVersion.isNotBlank())) {
+            if (result != null && result.reply.isNotBlank()) {
                 emit(GenerateState.Success(result))
             } else {
                 val rawHint = extractDebugContent(responseBody)
@@ -144,20 +144,18 @@ class AIRepository {
         }
     }.flowOn(Dispatchers.IO)
 
-    // 工具定义：8 个必需字段，类型严格。这是 OpenAI 兼容工具调用规范。
+    // 工具定义：6 个必需字段，类型严格。这是 OpenAI 兼容工具调用规范。
     private fun replyTool(): JsonObject = buildJsonObject {
         put("type", "function")
         put("function", buildJsonObject {
             put("name", "submit_reply")
-            put("description", "提交客服回复草稿，必须填写全部 8 个字段")
+            put("description", "提交客服回复草稿，必须填写全部 6 个字段")
             put("parameters", buildJsonObject {
                 put("type", "object")
                 put("required", buildJsonArray {
                     add(JsonPrimitive("is_sensitive"))
                     add(JsonPrimitive("sensitive_note"))
-                    add(JsonPrimitive("short"))
-                    add(JsonPrimitive("natural"))
-                    add(JsonPrimitive("invite"))
+                    add(JsonPrimitive("reply"))
                     add(JsonPrimitive("intent"))
                     add(JsonPrimitive("next_step"))
                     add(JsonPrimitive("human_confirm"))
@@ -171,17 +169,9 @@ class AIRepository {
                         put("type", "string")
                         put("description", "敏感原因说明，不敏感时为空字符串")
                     })
-                    put("short", buildJsonObject {
+                    put("reply", buildJsonObject {
                         put("type", "string")
-                        put("description", "简短版回复，2-3 句")
-                    })
-                    put("natural", buildJsonObject {
-                        put("type", "string")
-                        put("description", "自然版回复，3-5 句完整回复")
-                    })
-                    put("invite", buildJsonObject {
-                        put("type", "string")
-                        put("description", "邀约版回复，3-5 句，引导试听预约")
+                        put("description", "回复正文，3-5 句自然亲切的微信口吻；事实型问题直接给答案，结尾可顺势引导预约试听")
                     })
                     put("intent", buildJsonObject {
                         put("type", "string")
@@ -236,9 +226,7 @@ class AIRepository {
             GeneratedResult(
                 isSensitive = obj["is_sensitive"]?.jsonPrimitive?.boolean ?: false,
                 sensitiveNote = obj["sensitive_note"]?.jsonPrimitive?.content ?: "",
-                shortVersion = obj["short"]?.jsonPrimitive?.content ?: "",
-                naturalVersion = obj["natural"]?.jsonPrimitive?.content ?: "",
-                inviteVersion = obj["invite"]?.jsonPrimitive?.content ?: "",
+                reply = obj["reply"]?.jsonPrimitive?.content ?: "",
                 intent = obj["intent"]?.jsonPrimitive?.content ?: "",
                 nextStep = obj["next_step"]?.jsonPrimitive?.content ?: "",
                 humanConfirm = obj["human_confirm"]?.jsonPrimitive?.content ?: ""
